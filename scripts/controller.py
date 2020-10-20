@@ -1,56 +1,82 @@
 #!/usr/bin/env python
-# Software License Agreement (BSD License)
-#
-# Copyright (c) 2008, Willow Garage, Inc.
-# All rights reserved.
-#
-# Redistribution and use in source and binary forms, with or without
-# modification, are permitted provided that the following conditions
-# are met:
-#
-#  * Redistributions of source code must retain the above copyright
-#    notice, this list of conditions and the following disclaimer.
-#  * Redistributions in binary form must reproduce the above
-#    copyright notice, this list of conditions and the following
-#    disclaimer in the documentation and/or other materials provided
-#    with the distribution.
-#  * Neither the name of Willow Garage, Inc. nor the names of its
-#    contributors may be used to endorse or promote products derived
-#    from this software without specific prior written permission.
-#
-# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-# "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
-# FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
-# COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
-# INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
-# BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
-# LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
-# CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
-# LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
-# ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
-# POSSIBILITY OF SUCH DAMAGE.
-#
-# Revision $Id$
-
-## Simple talker demo that published std_msgs/Strings messages
-## to the 'chatter' topic
 
 import rospy
+import tf
 from std_msgs.msg import String
+from geometry_msgs.msg import Twist
+from geometry_msgs.msg import TransformStamped
+import math
 
-def talker():
-    pub = rospy.Publisher('chatter', String, queue_size=10)
-    rospy.init_node('talker', anonymous=True)
-    rate = rospy.Rate(10) # 10hz
+VICON_CAR_TOPIC = "vicon/jetracer_1/jetracer_1"
+# prob need a class 1 for 
+# https://answers.ros.org/question/232216/multiple-subscribers-and-single-publisher-in-one-python-script/
+
+
+
+class Controller():
+    def __init__(self):
+        pass
+
+    def vicon_callback(self):
+        pass
+''' if self.prev_call_vicon_ is None:
+            self.prev_call_vicon_ = rospy.Time.now().to_sec()
+            return
+twist = Twist()
+delta_time = rospy.Time.now().to_sec() - self.prev_call_vicon_
+twist.linear.x = math.hypot(prev_state["position"][0] - self.state_["position"][0], prev_state["position"][1] - self.state_["position"][1]) / delta_time
+twist.angular.z = ViconEnv.wrap_pi_to_pi(prev_state["orientation"]-self.state_["orientation"])/delta_time
+self.prev_call_vicon_ = rospy.Time.now().to_sec()
+self.velocity_history.add_element(np.asarray((twist.linear.x, twist.angular.z)), rospy.Time.now().to_sec())
+'''
+
+prev_vicon_msg_ts = None
+prev_position = {"x": 0.0, "y": 0.0}
+
+def calculate_heading(pose):
+    x = pose.rotation.x
+    y = pose.rotation.y
+    z = pose.rotation.z
+    w = pose.rotation.w
+    quaternion = (x,y,z,w)
+    (_, _, yaw) = tf.transformations.euler_from_quaternion(quaternion)
+    return yaw
+
+
+def callback(ts_data):
+    global prev_vicon_msg_ts
+    global prev_position
+    if prev_vicon_msg_ts == None:
+        current_time = rospy.Time().now().to_sec()
+        # prev_vicon_msg_ts = current_time.secs + current_time.nsecs
+        prev_vicon_msg_ts = current_time
+    pose = ts_data.transform
+    theta = calculate_heading(pose)
+    position = {}
+    position["x"] = pose.translation.y
+    position["y"] = -pose.translation.x
+
+    current_time = rospy.Time().now().to_sec()
+    delta_time = current_time - prev_vicon_msg_ts
+    prev_vicon_msg_ts = rospy.Time().now().to_sec()
+
+    v = math.hypot(position["x"] - prev_position["x"], position["y"] - prev_position["y"]) / delta_time
+    # rospy.loginfo("current x: {} current y: {}".format(position["x"], position["y"]))
+    # rospy.loginfo("prev x: {} prev y: {}".format(prev_position["x"], prev_position["y"]))
+    # rospy.loginfo("dt: {}".format(delta_time))
+    rospy.loginfo("speed: " + str(v))
+    prev_position = position
+
+
+
+def main():
+    rospy.init_node('jetson_controller')
+    rospy.Subscriber(VICON_CAR_TOPIC, TransformStamped, callback)
     while not rospy.is_shutdown():
-        hello_str = "hello world %s" % rospy.get_time()
-        rospy.loginfo(hello_str)
-        pub.publish(hello_str)
-        rate.sleep()
+        rospy.spin()
 
 if __name__ == '__main__':
     try:
-        talker()
+        main()
     except rospy.ROSInterruptException:
         pass
