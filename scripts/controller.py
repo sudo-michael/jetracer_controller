@@ -1,82 +1,114 @@
 #!/usr/bin/env python
-
 import rospy
 import tf
 from std_msgs.msg import String
 from geometry_msgs.msg import Twist
 from geometry_msgs.msg import TransformStamped
+from jetracer.msg import jetRacerCar as JetRacerCarMsg
+from collections import namedtuple
 import math
+import time
 
 VICON_CAR_TOPIC = "vicon/jetracer_1/jetracer_1"
-# prob need a class 1 for 
-# https://answers.ros.org/question/232216/multiple-subscribers-and-single-publisher-in-one-python-script/
-
-
+VICON_OBJECT_TOPIC = "vicon/jetracer_helmet/jetracer_helmet"
+KEYBOARD_CONTROL_TOPIC = "/jetRacer/keyboard"
+CAR_CONTROL_TOPIC = "/jetRacer_Controller"
 
 class Controller():
     def __init__(self):
-        pass
+        self.prev_ts_vicon_msg_timestamp = None
+        self.Position = namedtuple('Position', 'x y')
+        self.prev_position = self.Position(x=0.0, y=0.0)
+        rospy.init_node('jetracer_controller_node')
+        rospy.loginfo("starting jetracer controller node...")
+        rospy.Subscriber(KEYBOARD_CONTROL_TOPIC, JetRacerCarMsg, self.controller_callback, queue_size=1)
+        self.publisher = rospy.Publisher(CAR_CONTROL_TOPIC, JetRacerCarMsg, queue_size=1)
 
-    def vicon_callback(self):
-        pass
-''' if self.prev_call_vicon_ is None:
-            self.prev_call_vicon_ = rospy.Time.now().to_sec()
-            return
-twist = Twist()
-delta_time = rospy.Time.now().to_sec() - self.prev_call_vicon_
-twist.linear.x = math.hypot(prev_state["position"][0] - self.state_["position"][0], prev_state["position"][1] - self.state_["position"][1]) / delta_time
-twist.angular.z = ViconEnv.wrap_pi_to_pi(prev_state["orientation"]-self.state_["orientation"])/delta_time
-self.prev_call_vicon_ = rospy.Time.now().to_sec()
-self.velocity_history.add_element(np.asarray((twist.linear.x, twist.angular.z)), rospy.Time.now().to_sec())
-'''
+        # DEBUG
+        # rospy.Subscriber(VICON_CAR_TOPIC, TransformStamped, self.callback)
 
-prev_vicon_msg_ts = None
-prev_position = {"x": 0.0, "y": 0.0}
+        while not rospy.is_shutdown():
+            rospy.spin()
 
-def calculate_heading(pose):
-    x = pose.rotation.x
-    y = pose.rotation.y
-    z = pose.rotation.z
-    w = pose.rotation.w
-    quaternion = (x,y,z,w)
-    (_, _, yaw) = tf.transformations.euler_from_quaternion(quaternion)
-    return yaw
+    # DEBUG
+    '''
+    def callback(self, ts_msg):
+        if self.prev_ts_vicon_msg_timestamp == None:
+            current_time = rospy.Time().now().to_sec()
+            self.prev_ts_vicon_msg_timestamp = current_time
 
+        # get state of jetracer
+        pose = ts_msg.transform
+        theta = self.calculate_heading(pose)
+        position = self.Position(x=pose.translation.x, y=pose.translation.y)
+        velocity = self.calculate_velocity(position)
 
-def callback(ts_data):
-    global prev_vicon_msg_ts
-    global prev_position
-    if prev_vicon_msg_ts == None:
+        rospy.loginfo("theta: " + str(theta))
+        rospy.loginfo("speed: " + str(velocity))
+    '''
+
+    def calculate_heading(self, pose):
+        x = pose.rotation.x
+        y = pose.rotation.y
+        z = pose.rotation.z
+        w = pose.rotation.w
+        quaternion = (x,y,z,w)
+
+        # add offset to make yaw=0 face the wooden shelves
+        # with drones
+        rotation_quaternion = tf.transformations.quaternion_from_euler(0, 0, -math.pi/2)
+
+        quaternion = tf.transformations.quaternion_multiply(rotation_quaternion, quaternion)
+
+        roll, pitch, yaw = tf.transformations.euler_from_quaternion(quaternion)
+        return yaw
+
+    def calculate_velocity(self, position):
         current_time = rospy.Time().now().to_sec()
-        # prev_vicon_msg_ts = current_time.secs + current_time.nsecs
-        prev_vicon_msg_ts = current_time
-    pose = ts_data.transform
-    theta = calculate_heading(pose)
-    position = {}
-    position["x"] = pose.translation.y
-    position["y"] = -pose.translation.x
+        delta_time = current_time - self.prev_ts_vicon_msg_timestamp
+        self.prev_ts_vicon_msg_timestamp = rospy.Time().now().to_sec()
 
-    current_time = rospy.Time().now().to_sec()
-    delta_time = current_time - prev_vicon_msg_ts
-    prev_vicon_msg_ts = rospy.Time().now().to_sec()
+        if delta_time < 0.0001:
+            return  0.0
+        else:
+            velocity = math.hypot(position.x - self.prev_position.x, position.y - self.prev_position.y) / delta_time
+            self.prev_position = self.Position(x=position.x, y=position.y)
+            return velocity
 
-    v = math.hypot(position["x"] - prev_position["x"], position["y"] - prev_position["y"]) / delta_time
-    # rospy.loginfo("current x: {} current y: {}".format(position["x"], position["y"]))
-    # rospy.loginfo("prev x: {} prev y: {}".format(prev_position["x"], prev_position["y"]))
-    # rospy.loginfo("dt: {}".format(delta_time))
-    rospy.loginfo("speed: " + str(v))
-    prev_position = position
+    def controller_callback(self, jetracer_msg):
+        start_time = time.time()
+        ts_msg = rospy.wait_for_message(VICON_CAR_TOPIC, TransformStamped)
+        obj_msg = rospy.wait_for_message(VICON_OBJECT_TOPIC, TransformStamped)
+        end_time = time.time()
+        rospy.loginfo("eslapted time (s) {}".format(end_time - start_time))
 
+        if self.prev_ts_vicon_msg_timestamp == None:
+            current_time = rospy.Time().now().to_sec()
+            self.prev_ts_vicon_msg_timestamp = current_time
 
+        # get state of jetracer
+        pose = ts_msg.transform
+        theta = self.calculate_heading(pose)
+        position = self.Position(x=pose.translation.x, y=pose.translation.y)
+        velocity = self.calculate_velocity(position)
+
+        # get position of obstacle
+        pose =  obj_msg.transform.translation
+        x = pose.x
+        y = pose.y
+        z = pose.z
+        # rospy.loginfo("theta: " + str(theta))
+        # rospy.loginfo("speed: " + str(velocity))
+        rospy.loginfo("x: {}, y: {}, z: {}".format(x,y,z))
+
+        self.publisher.publish(jetracer_msg)
 
 def main():
-    rospy.init_node('jetson_controller')
-    rospy.Subscriber(VICON_CAR_TOPIC, TransformStamped, callback)
-    while not rospy.is_shutdown():
-        rospy.spin()
+    try:
+        controller = Controller()
+    except rospy.ROSInterruptException:
+        rospy.loginfo("shutdown")
+        pass
 
 if __name__ == '__main__':
-    try:
-        main()
-    except rospy.ROSInterruptException:
-        pass
+    main()
