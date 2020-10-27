@@ -1,0 +1,7 @@
+digraph G {
+"world" -> "vicon/jetracer_1/jetracer_1"[label="Broadcaster: /vicon\nAverage rate: 120.076 Hz\nMost recent transform: 1603391986.426 ( 0.016 sec old)\nBuffer length: 4.980 sec\n"];
+edge [style=invis];
+ subgraph cluster_legend { style=bold; color=black; label ="view_frames Result";
+"Recorded at time: 1603391986.442"[ shape=plaintext ] ;
+ }->"world";
+}
