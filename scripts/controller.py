@@ -18,7 +18,7 @@ CAR_CONTROL_TOPIC = "/jetRacer_Controller"
 DEBUG = False
 
 class DubinsCar4D:
-    def __init__(self, x=[0,0,0,0], uMin = [-1.0, -math.pi / 12], uMax = [1.0, math.pi / 12],
+    def __init__(self, x=[0,0,0,0], uMin = [-3.0, -math.pi / 12], uMax = [3.0, math.pi / 12],
                  dMin = [0.0, 0.0], dMax=[0.0, 0.0], uMode="min", dMode="max"):
         """Creates a Dublin Car with the following states:
            X position, Y position, acceleration, heading
@@ -127,6 +127,9 @@ class Grid:
             index.append(idx-1)
           else:
             index.append(idx)
+
+        #E rospy.logwarn("going faster than in irl")
+        # index[2] = 19
         rospy.loginfo("x: {} y: {}, v: {}, theta: {}".format(
             self.__grid_points[0][index[0]],
             self.__grid_points[1][index[1]],
@@ -147,12 +150,12 @@ class Controller():
                          4,
                          np.array([60, 60, 20, 36]), [3])
         '''
-        self.grid = Grid(np.array([-1.0, -1.0, -1.0, -math.pi]),
-                         np.array([2.0, 2.0, 1.0, math.pi]),
+        self.grid = Grid(np.array([-3.0, -1.0, 0.0, -math.pi]),
+                         np.array([4.0, 3.0, 3.5, math.pi]),
                          4,
-                         np.array([40, 40, 20, 20]), [3])
+                         np.array([50, 50, 20, 20]), [3])
         self.V = np.load("cone00.npy")
-        self.car = DubinsCar4D() 
+        self.car = DubinsCar4D()
         self.prev_ts_vicon_msg_timestamp = None
         self.Position = namedtuple('Position', 'x y')
         self.prev_position = self.Position(x=0.0, y=0.0)
@@ -188,7 +191,9 @@ class Controller():
 
         # get state of jetracer
         pose = ts_msg.transform
+
         theta = self.calculate_heading(pose)
+        rospy.loginfo("theta: {}".format(theta))
         position = self.Position(x=pose.translation.x, y=pose.translation.y)
         velocity = self.calculate_velocity(position)
 
@@ -214,7 +219,9 @@ class Controller():
         value = self.grid.get_value(self.V, state)
         rospy.loginfo("value: {}".format(value))
         if value < 0.1:
-            rospy.loginfo("optimal control taking over!")
+            rospy.logwarn("optimal control taking over!")
+            rospy.logwarn("x: {} y: {}, v: {}, theta: {}".format(
+                state[0], state[1], state[2], state[3]))
             opt_a, opt_w = self.car.opt_ctrl(state, (0, 0, dV_dx3, dV_dx4))
             rospy.loginfo("opt a: {} opt w: {}".format(opt_a, opt_w))
             jetracer_msg = JetRacerCarMsg()
@@ -236,6 +243,7 @@ class Controller():
         # with drones
         # rotation_quaternion = tf.transformations.quaternion_from_euler(0, 0, math.pi/2)
         rotation_quaternion = tf.transformations.quaternion_from_euler(0, 0, 0)
+        # rotation_quaternion = tf.transformations.quaternion_from_euler(0, 0, math.pi)
         # rotation_quaternion = tf.transformations.quaternion_from_euler(0, 0, -math.pi)
 
         quaternion = tf.transformations.quaternion_multiply(rotation_quaternion, quaternion)
