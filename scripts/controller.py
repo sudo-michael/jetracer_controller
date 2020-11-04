@@ -9,7 +9,7 @@ import math
 import time
 
 VICON_CAR_TOPIC = "vicon/jetracer_1/jetracer_1"
-VICON_OBJECT_TOPIC = "vicon/jetracer_helmet/jetracer_helmet"
+# VICON_OBJECT_TOPIC = "vicon/jetracer_helmet/jetracer_helmet"
 KEYBOARD_CONTROL_TOPIC = "/jetRacer/keyboard"
 CAR_CONTROL_TOPIC = "/jetRacer_Controller"
 
@@ -141,16 +141,6 @@ class Grid:
             else:
                 index.append(idx)
 
-        # E rospy.logwarn("going faster than in irl")
-        # index[2] = 19
-        rospy.loginfo(
-            "x: {} y: {}, v: {}, theta: {}".format(
-                self.__grid_points[0][index[0]],
-                self.__grid_points[1][index[1]],
-                self.__grid_points[2][index[2]],
-                self.__grid_points[3][index[3]],
-            )
-        )
         return index
 
     def get_value(self, V, state):
@@ -161,13 +151,13 @@ class Grid:
 class Controller:
     def __init__(self):
         self.grid = Grid(
-            np.array([-3.0, -1.0, 0.0, -math.pi]),
-            np.array([4.0, 3.0, 3.5, math.pi]),
+            np.array([-4.0, -1.0, -1.0, -math.pi]),
+            np.array([4.0, 4.0, 5.0, math.pi]),
             4,
-            np.array([50, 50, 20, 20]),
+            np.array([60, 60, 50, 50]),
             [3],
         )
-        self.V_file = "cone00.npy"
+        self.V_file = "cone01_r06.npy"
         self.V = np.load(self.V_file)
         self.car = DubinsCar4D()
         self.prev_ts_vicon_msg_timestamp = None
@@ -180,14 +170,18 @@ class Controller:
         rospy.loginfo("using value function: {}".format(self.V_file))
 
         if DEBUG:
-            rospy.Subscriber(VICON_CAR_TOPIC, TransformStamped, self.callback)
+            rospy.Subscriber(VICON_CAR_TOPIC, TransformStamped, self.velocity_test, queue_size=1)
+            # rospy.Subscriber(VICON_CAR_TOPIC, TransformStamped, self.callback)
         else:
+            rospy.Subscriber(VICON_CAR_TOPIC, TransformStamped, self.callback, queue_size=1)
+            '''
             rospy.Subscriber(
                 KEYBOARD_CONTROL_TOPIC,
                 JetRacerCarMsg,
                 self.controller_callback,
                 queue_size=1,
             )
+            '''
 
             self.publisher = rospy.Publisher(
                 CAR_CONTROL_TOPIC, JetRacerCarMsg, queue_size=1
@@ -197,10 +191,23 @@ class Controller:
         self.max_t = 0.0
         self.min_dt = 100
         self.max_d = 0.0
+        self.optimal_takeover = False
+        self.optimal_timestamp = rospy.Time().now().to_sec()
+        self.optimal_msg = JetRacerCarMsg()
 
         while not rospy.is_shutdown():
             rospy.spin()
 
+    def velocity_test(self, ts_msg):
+        if self.prev_ts_vicon_msg_timestamp == None:
+            current_time = rospy.Time().now().to_sec()
+            self.prev_ts_vicon_msg_timestamp = current_time
+
+            self.prev_position = self.Position(
+                x=pose.translation.x, y=pose.translation.y
+            )
+
+    '''
     def controller_callback(self, jetracer_msg):
         start_time = time.time()
         ts_msg = rospy.wait_for_message(VICON_CAR_TOPIC, TransformStamped)
@@ -229,6 +236,7 @@ class Controller:
             self.grid.__grid_points[3][l]))
         """
 
+        # LOOK HERE
         dV_dx3_L, dV_dx3_R = self.spa_derivX3_4d(i, j, k, l, self.V, self.grid)
         dV_dx4_L, dV_dx4_R = self.spa_derivX4_4d(i, j, k, l, self.V, self.grid)
 
@@ -236,7 +244,7 @@ class Controller:
         dV_dx4 = (dV_dx4_L + dV_dx4_R) / 2
 
         # rospy.loginfo("theta: " + str(theta))
-        rospy.loginfo("speed: " + str(velocity))
+        # rospy.loginfo("speed: " + str(velocity))
 
         value = self.grid.get_value(self.V, state)
         rospy.loginfo("value: {}".format(value))
@@ -251,11 +259,12 @@ class Controller:
             rospy.loginfo("opt a: {} opt w: {}".format(opt_a, opt_w))
             jetracer_msg = JetRacerCarMsg()
             jetracer_msg.throttle = state[2] + 0.2 * opt_a
-            jetracer_msg.throttle = min(jetracer_msg.throttle, 10.0)
-            jetracer_msg.throttle = max(jetracer_msg.throttle, 15.0)
+            jetracer_msg.throttle = max(jetracer_msg.throttle, 10.0)
+            jetracer_msg.throttle = min(jetracer_msg.throttle, 35.0)
             jetracer_msg.steerAngle = opt_w
 
         self.publisher.publish(jetracer_msg)
+    '''
 
     def calculate_heading(self, pose):
         x = pose.rotation.x
@@ -266,8 +275,9 @@ class Controller:
 
         # add offset to make yaw=0 face the wooden shelves
         # with drones
-        # rotation_quaternion = tf.transformations.quaternion_from_euler(0, 0, math.pi/2)
-        rotation_quaternion = tf.transformations.quaternion_from_euler(0, 0, 0)
+        # rotation_quaternion = tf.transformations.quaternion_from_euler(0, 0, math.pi/4)
+        rotation_quaternion = tf.transformations.quaternion_from_euler(0, 0, -math.pi/8)
+        # rotation_quaternion = tf.transformations.quaternion_from_euler(0, 0, 0)
         # rotation_quaternion = tf.transformations.quaternion_from_euler(0, 0, math.pi)
         # rotation_quaternion = tf.transformations.quaternion_from_euler(0, 0, -math.pi)
 
@@ -291,18 +301,13 @@ class Controller:
             )
             / delta_time
         )
-        # rospy.loginfo("dist: {}".format(velocity))
-        # self.max_d = max(self.max_d, velocity)
-        # rospy.loginfo("max dist: {}".format(self.max_d))
-        # self.min_dt = min(self.min_dt, delta_time)
-        # rospy.loginfo("min dt: {}".format(self.min_dt))
-        # velocity /= delta_time
+        rospy.logdebug("dt: {}".format(delta_time))
         self.prev_position = self.Position(x=position.x, y=position.y)
         self.prev_ts_vicon_msg_timestamp = rospy.Time().now().to_sec()
+        self.prev_velocity = velocity
         return velocity
 
     def callback(self, ts_msg):
-        """ debug """
         if self.prev_ts_vicon_msg_timestamp == None:
             current_time = rospy.Time().now().to_sec()
             self.prev_ts_vicon_msg_timestamp = current_time
@@ -316,46 +321,77 @@ class Controller:
         theta = self.calculate_heading(pose)
         position = self.Position(x=pose.translation.x, y=pose.translation.y)
         velocity = self.calculate_velocity(position)
-
         state = (position.x, position.y, velocity, theta)
         i, j, k, l = self.grid.get_index(state)
 
-        """
-        rospy.loginfo("x: {} y: {}, v: {}, theta: {}".format(
-            self.grid.__grid_points[0][i],
-            self.grid.__grid_points[1][j],
-            self.grid.__grid_points[2][k],
-            self.grid.__grid_points[3][l]))
-        """
+        rospy.logdebug("x: {} y: {}, v: {}, theta: {}".format(
+            self.grid._Grid__grid_points[0][i],
+            self.grid._Grid__grid_points[1][j],
+            self.grid._Grid__grid_points[2][k],
+            self.grid._Grid__grid_points[3][l]))
 
-        dV_dx3_L, dV_dx3_R = self.spa_derivX3_4d(i, j, k, l, self.V, self.grid)
-        dV_dx4_L, dV_dx4_R = self.spa_derivX4_4d(i, j, k, l, self.V, self.grid)
-
-        dV_dx3 = (dV_dx3_L + dV_dx3_R) / 2
-        dV_dx4 = (dV_dx4_L + dV_dx4_R) / 2
-
-        value = self.grid.get_value(self.V, state)
-        rospy.loginfo("value: {}".format(value))
-        if value < 0.1:
-            rospy.logwarn("optimal control taking over!")
-            rospy.logwarn(
-                "x: {} y: {}, v: {}, theta: {}".format(
-                    state[0], state[1], state[2], state[3]
-                )
+        '''
+        rospy.loginfo(
+            "x: {} y: {}, v: {}, theta: {}".format(
+                state[0], state[1], state[2], state[3]
             )
+        )
+        '''
+        value = self.grid.get_value(self.V, state)
+        rospy.logdebug("value: {}".format(value))
+
+        current_time = rospy.Time().now().to_sec()
+        delta_time = current_time - self.optimal_timestamp
+        if self.optimal_takeover:
+            self.publisher.publish(self.optimal_msg)
+            if delta_time > 0.7:
+                rospy.logwarn("optimal control is over!")
+                self.optimal_takeover = False
+                self.optimal_msg = JetRacerCarMsg()
+        elif value < 0.1:
+            rospy.logwarn("optimal control taking over!")
+            rospy.loginfo("x: {} y: {}, v: {}, theta: {}".format(
+                self.grid._Grid__grid_points[0][i],
+                self.grid._Grid__grid_points[1][j],
+                self.grid._Grid__grid_points[2][k],
+                self.grid._Grid__grid_points[3][l]))
+            rospy.logdebug("x_idx: {} y_idx: {}, v_idx: {}, theta_idx: {}".format(i, j, k, l))
+
+            dV_dx3_L, dV_dx3_R = self.spa_derivX3_4d(i, j, k, l, self.V, self.grid)
+            dV_dx4_L, dV_dx4_R = self.spa_derivX4_4d(i, j, k, l, self.V, self.grid)
+
+            dV_dx3 = (dV_dx3_L + dV_dx3_R) / 2
+            dV_dx4 = (dV_dx4_L + dV_dx4_R) / 2
+
             opt_a, opt_w = self.car.opt_ctrl(state, (0, 0, dV_dx3, dV_dx4))
-            rospy.loginfo("opt a: {} opt w: {}".format(opt_a, opt_w))
+            rospy.loginfo("opt_a: {} opt_w: {}".format(opt_a, opt_w))
             jetracer_msg = JetRacerCarMsg()
-            jetracer_msg.throttle = state[2] + 0.2 * opt_a
-            jetracer_msg.throttle = min(jetracer_msg.throttle, 10.0)
-            jetracer_msg.throttle = max(jetracer_msg.throttle, 15.0)
-            jetracer_msg.steerAngle = opt_w
+            jetracer_msg.throttle = state[2] + 0.1 * opt_a
+
+            # keep it moving
+            jetracer_msg.throttle = max(jetracer_msg.throttle, 20.0)
+            # jetracer_msg.throttle = min(jetracer_msg.throttle, 20.0)
+            # change sigh of opt_w to go in the correct direction
+            # -steerAngle -> turn ccw
+            # +steerAngle -> turn cw
+            jetracer_msg.steerAngle = -1 * opt_w
+
+            self.optimal_takeover = True
+            self.optimal_timestamp = rospy.Time().now().to_sec()
+            self.optimal_msg.throttle = jetracer_msg.throttle
+            self.optimal_msg.steerAngle = jetracer_msg.steerAngle
+
+            rospy.loginfo("throttle: {} steerAngle: {}".format(jetracer_msg.throttle, jetracer_msg.steerAngle))
             self.publisher.publish(jetracer_msg)
         else:
-            jetracer_msg = rospy.wait_for_message(
-                KEYBOARD_CONTROL_TOPIC, JetRacerCarMsg, timeout=0.1
-            )
-            self.publisher.publish(jetracer_msg)
+            try:
+                jetracer_msg = rospy.wait_for_message(
+                    KEYBOARD_CONTROL_TOPIC, JetRacerCarMsg, timeout=0.1
+                )
+                self.publisher.publish(jetracer_msg)
+            except:
+                rospy.logdebug("did not receive control command")
+
 
     def spa_derivX4_4d(
         self, i, j, k, l, V, g
