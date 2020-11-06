@@ -91,7 +91,7 @@ class DubinsCar4D:
         return opt_a, opt_w
 
     def dynamics(self, t, state, uOpt):
-        L = 0.26
+        L = 0.3
         x_dot = state[2] * math.cos(state[3])
         y_dot = state[2] * math.sin(state[3])
         v_dot = uOpt[0]
@@ -138,6 +138,12 @@ class Grid:
                 or math.fabs(s - self.__grid_points[i][idx - 1])
                 < math.fabs(s - self.__grid_points[i][idx])
             ):
+                '''
+                if i == 0:
+                    rospy.loginfo("x-inbetween: {} - {}".format(self.__grid_points[i][idx-1], self.__grid_points[i][idx]))
+                elif i==1:
+                    rospy.loginfo("y-inbetween: {} - {}".format(self.__grid_points[i][idx-1], self.__grid_points[i][idx]))
+                '''
                 index.append(idx - 1)
             else:
                 index.append(idx)
@@ -152,13 +158,13 @@ class Grid:
 class Controller:
     def __init__(self):
         self.grid = Grid(
-            np.array([-4.0, -1.0, -1.0, -math.pi]),
-            np.array([4.0, 4.0, 5.0, math.pi]),
+            np.array([-3.0, -1.0, -1.0, -math.pi]),
+            np.array([3.0, 4.0, 5.0, math.pi]),
             4,
             np.array([60, 60, 50, 50]),
             [3],
         )
-        self.V_file = "/home/michael/catkin_ws/src/jetracer_controller/scripts/cone01_r06.npy"
+        self.V_file = "/home/michael/catkin_ws/src/jetracer_controller/scripts/cone01_r07.npy"
         self.V = np.load(self.V_file)
         self.car = DubinsCar4D()
         self.prev_ts_vicon_msg_timestamp = None
@@ -301,8 +307,8 @@ class Controller:
         # add offset to make yaw=0 face the wooden shelves
         # with drones
         # rotation_quaternion = tf.transformations.quaternion_from_euler(0, 0, math.pi/4)
-        rotation_quaternion = tf.transformations.quaternion_from_euler(0, 0, -math.pi/8)
-        # rotation_quaternion = tf.transformations.quaternion_from_euler(0, 0, 0)
+        # rotation_quaternion = tf.transformations.quaternion_from_euler(0, 0, -math.pi/8)
+        rotation_quaternion = tf.transformations.quaternion_from_euler(0, 0, 0)
         # rotation_quaternion = tf.transformations.quaternion_from_euler(0, 0, math.pi)
         # rotation_quaternion = tf.transformations.quaternion_from_euler(0, 0, -math.pi)
 
@@ -384,10 +390,9 @@ class Controller:
         delta_time = current_time - self.optimal_timestamp
         # if we near the bonudary, allow optimal control to take over for 0.5 seconds
         # before handing control back to user
+        '''
         if self.optimal_takeover:
-            if delta_time > (0.5 * 1000000000) or value >= self.boundary_epsilon:
-                rospy.loginfo("dt: {}".format(delta_time))
-                rospy.loginfo("value: {}".format(value))
+            if delta_time > (0.7 * 1000000000) or value >= self.boundary_epsilon:
                 rospy.logwarn("optimal control is over!")
                 self.optimal_takeover = False
                 self.optimal_msg = JetRacerCarMsg()
@@ -396,14 +401,17 @@ class Controller:
                 self.play_sound = True
             else:
                 self.publisher.publish(self.optimal_msg)
+        '''
         # near the bonudary of BRT, apply optimal control
-        elif value < self.boundary_epsilon:
+        if value < self.boundary_epsilon:
             rospy.logwarn("optimal control taking over!")
-            rospy.loginfo("x: {} y: {}, v: {}, theta: {}".format(
+            rospy.loginfo("in grid world\nx: {} y: {}, v: {}, theta: {}".format(
                 self.grid._Grid__grid_points[0][i],
                 self.grid._Grid__grid_points[1][j],
                 self.grid._Grid__grid_points[2][k],
                 self.grid._Grid__grid_points[3][l]))
+            rospy.loginfo("irl\n x: {} y: {}, v: {}, theta: {}".format(
+                state[0], state[1], state[2], state[3]))
 
             rospy.logdebug("x_idx: {} y_idx: {}, v_idx: {}, theta_idx: {}".format(i, j, k, l))
 
@@ -414,9 +422,9 @@ class Controller:
             dV_dx4 = (dV_dx4_L + dV_dx4_R) / 2
 
             opt_a, opt_w = self.car.opt_ctrl(state, (0, 0, dV_dx3, dV_dx4))
-            rospy.loginfo("opt_a: {} opt_w: {}".format(opt_a, opt_w))
+            # rospy.loginfo("opt_a: {} opt_w: {}".format(opt_a, opt_w))
             jetracer_msg = JetRacerCarMsg()
-            wanted_vel = state[2] + 0.5 * opt_a
+            wanted_vel = state[2] + 0.1 * opt_a
 
             # find throttle closest to velocity
             idx = np.searchsorted(self.velocity_index, wanted_vel)
@@ -434,14 +442,21 @@ class Controller:
             # +steerAngle -> turn cw
             jetracer_msg.steerAngle = -1 * opt_w
 
-            subprocess.Popen(["ffplay", "-nodisp", "-autoexit", "-loglevel", "quiet",  "/home/michael/catkin_ws/src/jetracer_controller/scripts/safe.wav"])
+            if self.play_sound:
+                subprocess.Popen(["ffplay", "-nodisp", "-autoexit", "-loglevel", "quiet",  "/home/michael/catkin_ws/src/jetracer_controller/scripts/safe.wav"])
+                self.play_sound = False
 
             self.optimal_takeover = True
             self.optimal_timestamp = rospy.Time().now().to_nsec()
             self.optimal_msg.throttle = jetracer_msg.throttle
             self.optimal_msg.steerAngle = jetracer_msg.steerAngle
 
-            rospy.loginfo("throttle: {} steerAngle: {}".format(jetracer_msg.throttle, jetracer_msg.steerAngle))
+            if jetracer_msg.steerAngle < 0:
+                rospy.loginfo("throttle: {} steerAngle: {} {}".format(jetracer_msg.throttle, jetracer_msg.steerAngle, "left"))
+            else:
+                rospy.loginfo("throttle: {} steerAngle: {} {}".format(jetracer_msg.throttle, jetracer_msg.steerAngle, "right"))
+
+            # rospy.loginfo("throttle: {} steerAngle: {}".format(jetracer_msg.throttle, jetracer_msg.steerAngle))
             self.publisher.publish(jetracer_msg)
         else:
             '''
@@ -450,6 +465,7 @@ class Controller:
             )
             rospy.loginfo("receiv control")
             '''
+            self.play_sound = True
 
 
             self.jetracer_msg_mutex.acquire()
