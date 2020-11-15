@@ -21,8 +21,8 @@ class DubinsCar4D:
     def __init__(
         self,
         x=[0, 0, 0, 0],
-        uMin=[-1.5, -math.pi / 12],
-        uMax=[1.5, math.pi / 12],
+        uMin=[-1.5, -math.pi / 18],
+        uMax=[1.5, math.pi / 18],
         dMin=[0.0, 0.0],
         dMax=[0.0, 0.0],
         uMode="max",
@@ -158,17 +158,16 @@ class Grid:
 class Controller:
     def __init__(self):
         self.grid = Grid(
-            np.array([-3.0, -1.0, -1.0, -math.pi]),
-            np.array([3.0, 4.0, 5.0, math.pi]),
+            np.array([-3.0, -1.0, 0.0, -math.pi]),
+            np.array([3.0, 4.0, 4.0, math.pi]),
             4,
-            # np.array([60, 60, 50, 50]),
-            np.array([40, 40, 30, 30]),
+            np.array([60, 60, 20, 36]),
+            # np.array([40, 40, 30, 30]),
             [3],
         )
-        # self.V_file = "/home/michael/catkin_ws/src/jetracer_controller/scripts/cone_01_r07_2.npy"
-        # self.V_file = "/home/michael/catkin_ws/src/jetracer_controller/scripts/cone_01_r07_253_r07.npy"
-        self.V_file = "/home/michael/catkin_ws/src/jetracer_controller/scripts/cone_01_r07_-227_r07.npy"
-        # self.V_file = "/home/michael/catkin_ws/src/jetracer_controller/scripts/cone_line_01_r07.npy"
+        self.V_file = "/home/michael/catkin_ws/src/jetracer_controller/scripts/apart.npy"
+        # self.V_file = "/home/michael/catkin_ws/src/jetracer_controller/scripts/line_01.npy"
+        # self.V_file = "/home/michael/catkin_ws/src/jetracer_controller/scripts/center.npy"
         self.V = np.load(self.V_file)
         self.car = DubinsCar4D()
         self.prev_ts_vicon_msg_timestamp = None
@@ -211,7 +210,7 @@ class Controller:
         self.jetracer_msg_mutex = Lock()
         self.jetracer_msg = JetRacerCarMsg()
 
-        self.boundary_epsilon = 0.1
+        self.boundary_epsilon = 0.15
 
         # play a sound when optimal control takes over
         self.play_sound = True
@@ -328,7 +327,7 @@ class Controller:
         delta_time = current_time - self.prev_ts_vicon_msg_timestamp
         rospy.logdebug("dt: {}".format(delta_time))
 
-        if delta_time < 0.05:
+        if delta_time < 0.03:
             return self.prev_velocity
 
         velocity = (
@@ -342,6 +341,8 @@ class Controller:
         self.prev_velocity = velocity
         return velocity
 
+    def in_bound(self, state):
+        return (-3.0 <= state[0] <= 3.0) and (-1.0 <= state[1] <= 4.0)
     def callback(self, ts_msg):
         if self.prev_ts_vicon_msg_timestamp == None:
             current_time = rospy.Time().now().to_sec()
@@ -394,32 +395,8 @@ class Controller:
         delta_time = current_time - self.optimal_timestamp
         # if we near the bonudary, allow optimal control to take over for 0.5 seconds
         # before handing control back to user
-        '''
-        if self.optimal_takeover:
-            if delta_time > (0.7 * 1000000000) or value >= self.boundary_epsilon:
-                rospy.logwarn("optimal control is over!")
-                self.optimal_takeover = False
-                self.optimal_msg = JetRacerCarMsg()
-
-                # allow to play sound again
-                self.play_sound = True
-            else:
-                self.publisher.publish(self.optimal_msg)
-        '''
         # near the bonudary of BRT, apply optimal control
-        if value < self.boundary_epsilon:
-            '''
-            rospy.loginfo("in grid world\nx: {} y: {}, v: {}, theta: {}".format(
-                self.grid._Grid__grid_points[0][i],
-                self.grid._Grid__grid_points[1][j],
-                self.grid._Grid__grid_points[2][k],
-                self.grid._Grid__grid_points[3][l]))
-            rospy.loginfo("irl\n x: {} y: {}, v: {}, theta: {}".format(
-                state[0], state[1], state[2], state[3]))
-
-            rospy.logdebug("x_idx: {} y_idx: {}, v_idx: {}, theta_idx: {}".format(i, j, k, l))
-            '''
-
+        if value <= self.boundary_epsilon and self.in_bound(state):
             dV_dx3_L, dV_dx3_R = self.spa_derivX3_4d(i, j, k, l, self.V, self.grid)
             dV_dx4_L, dV_dx4_R = self.spa_derivX4_4d(i, j, k, l, self.V, self.grid)
 
@@ -439,6 +416,10 @@ class Controller:
                 < math.fabs(wanted_vel - self.velocity_index[idx])
             ):
                 idx -= 1
+
+            # if state[2] > 3.0:
+            #    jetracer_msg.throttle = 0.0
+            #else:
             idx += 10
             jetracer_msg.throttle = idx
 
@@ -449,6 +430,7 @@ class Controller:
             jetracer_msg.steerAngle = -1 * opt_w
 
             if self.play_sound:
+                jetracer_msg.throttle = 0.0
                 subprocess.Popen(["ffplay", "-nodisp", "-autoexit", "-loglevel", "quiet",  "/home/michael/catkin_ws/src/jetracer_controller/scripts/safe.wav"])
                 self.play_sound = False
 
@@ -458,6 +440,12 @@ class Controller:
                 else:
                     rospy.loginfo("throttle: {} steerAngle: {} {}".format(jetracer_msg.throttle, jetracer_msg.steerAngle, "right"))
                 rospy.loginfo("value: {}".format(value))
+                rospy.loginfo("in grid world\nx: {} y: {}, v: {}, theta: {}".format(
+                    self.grid._Grid__grid_points[0][i],
+                    self.grid._Grid__grid_points[1][j],
+                    self.grid._Grid__grid_points[2][k],
+                    self.grid._Grid__grid_points[3][l]))
+
                 rospy.loginfo("irl\n x: {} y: {}, v: {}, theta: {}".format(
                     state[0], state[1], state[2], state[3]))
 
@@ -468,7 +456,7 @@ class Controller:
 
 
             # rospy.loginfo("throttle: {} steerAngle: {}".format(jetracer_msg.throttle, jetracer_msg.steerAngle))
-            self.publisher.publish(jetracer_msg)
+            self.publisher.publish(self.optimal_msg)
         else:
             '''
             jetracer_msg = rospy.wait_for_message(
@@ -478,8 +466,6 @@ class Controller:
             '''
             if self.play_sound == False:
                 self.play_sound = True
-                rospy.loginfo("irl\n x: {} y: {}, v: {}, theta: {}".format(
-                    state[0], state[1], state[2], state[3]))
 
 
 
