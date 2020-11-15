@@ -4,14 +4,16 @@ import tf
 import numpy as np
 from geometry_msgs.msg import TransformStamped
 from jetracer.msg import jetRacerCar as JetRacerCarMsg
+from sensor_msgs.msg import Joy
 from collections import namedtuple
 import math
 import time
 from threading import Lock
 import subprocess
+
 VICON_CAR_TOPIC = "vicon/jetracer_1/jetracer_1"
-# VICON_OBJECT_TOPIC = "vicon/jetracer_helmet/jetracer_helmet"
 KEYBOARD_CONTROL_TOPIC = "/jetRacer/keyboard"
+JOY_TOPIC = "/joy"
 CAR_CONTROL_TOPIC = "/jetRacer_Controller"
 
 DEBUG = False
@@ -21,8 +23,8 @@ class DubinsCar4D:
     def __init__(
         self,
         x=[0, 0, 0, 0],
-        uMin=[-1.5, -math.pi / 18],
-        uMax=[1.5, math.pi / 18],
+        uMin=[-1.5, -math.pi / 12],
+        uMax=[1.5, math.pi / 12],
         dMin=[0.0, 0.0],
         dMax=[0.0, 0.0],
         uMode="max",
@@ -162,13 +164,15 @@ class Controller:
             np.array([3.0, 4.0, 4.0, math.pi]),
             4,
             np.array([60, 60, 20, 36]),
-            # np.array([40, 40, 30, 30]),
             [3],
         )
-        self.V_file = "/home/michael/catkin_ws/src/jetracer_controller/scripts/apart.npy"
-        # self.V_file = "/home/michael/catkin_ws/src/jetracer_controller/scripts/line_01.npy"
-        # self.V_file = "/home/michael/catkin_ws/src/jetracer_controller/scripts/center.npy"
-        self.V = np.load(self.V_file)
+        self.V_file_apart = "/home/michael/catkin_ws/src/jetracer_controller/scripts/apart.npy"
+        self.V_file_line = "/home/michael/catkin_ws/src/jetracer_controller/scripts/line_01.npy"
+        self.V_file_center = "/home/michael/catkin_ws/src/jetracer_controller/scripts/center.npy"
+        self.V_apart = np.load(self.V_file_apart)
+        self.V_line = np.load(self.V_file_line)
+        self.V_center = np.load(self.V_file_center)
+        self.V = self.V_center
         self.car = DubinsCar4D()
         self.prev_ts_vicon_msg_timestamp = None
         self.Position = namedtuple("Position", "x y")
@@ -177,38 +181,25 @@ class Controller:
 
         rospy.init_node("jetracer_controller_node")
         rospy.loginfo("starting jetracer controller node...")
-        rospy.loginfo("using value function: {}".format(self.V_file))
+        rospy.loginfo("using value function: {}".format(self.V_file_center))
 
-        if DEBUG:
-            rospy.Subscriber(VICON_CAR_TOPIC, TransformStamped, self.velocity_test, queue_size=1)
-            # rospy.Subscriber(VICON_CAR_TOPIC, TransformStamped, self.callback)
-        else:
-            rospy.loginfo("starting subscriber for {}".format(VICON_CAR_TOPIC))
-            rospy.Subscriber(KEYBOARD_CONTROL_TOPIC, JetRacerCarMsg, self.control_callback, queue_size=1)
-            rospy.Subscriber(VICON_CAR_TOPIC, TransformStamped, self.callback, queue_size=1)
-            '''
-            rospy.Subscriber(
-                KEYBOARD_CONTROL_TOPIC,
-                JetRacerCarMsg,
-                self.controller_callback,
-                queue_size=1,
-            )
-            '''
+        rospy.loginfo("starting subscriber for {}".format(VICON_CAR_TOPIC))
+        rospy.Subscriber(JOY_TOPIC, Joy, self.joy_callback, queue_size=1)
+        rospy.Subscriber(KEYBOARD_CONTROL_TOPIC, JetRacerCarMsg, self.control_callback, queue_size=1)
+        rospy.Subscriber(VICON_CAR_TOPIC, TransformStamped, self.callback, queue_size=1)
 
-            self.publisher = rospy.Publisher(
-                CAR_CONTROL_TOPIC, JetRacerCarMsg, queue_size=1
-            )
+        self.publisher = rospy.Publisher(
+            CAR_CONTROL_TOPIC, JetRacerCarMsg, queue_size=1
+        )
 
-        self.max_speed = 0.0
-        self.max_t = 0.0
-        self.min_dt = 100
-        self.max_d = 0.0
         self.optimal_takeover = False
         self.optimal_timestamp = rospy.Time().now().to_sec()
         self.optimal_msg = JetRacerCarMsg()
 
         self.jetracer_msg_mutex = Lock()
         self.jetracer_msg = JetRacerCarMsg()
+
+        self.V_mutex = Lock()
 
         self.boundary_epsilon = 0.15
 
@@ -219,6 +210,26 @@ class Controller:
 
         while not rospy.is_shutdown():
             rospy.spin()
+
+    def joy_callback(self, joy_msg):
+        if joy_msg.buttons[2]:
+            rospy.loginfo("switch to line value")
+            time.sleep(0.15)
+            self.V_mutex.acquire()
+            self.V = self.V_line
+            self.V_mutex.release()
+        elif joy_msg.buttons[0]:
+            rospy.loginfo("switch to center value ")
+            time.sleep(0.15)
+            self.V_mutex.acquire()
+            self.V = self.V_center
+            self.V_mutex.release()
+        elif joy_msg.buttons[1]:
+            rospy.loginfo("switch to apart value ")
+            time.sleep(0.15)
+            self.V_mutex.acquire()
+            self.V = self.V_apart
+            self.V_mutex.release()
 
     def velocity_test(self, ts_msg):
         if self.prev_ts_vicon_msg_timestamp == None:
@@ -237,68 +248,6 @@ class Controller:
         self.jetracer_msg.steerAngle = jetracer_msg.steerAngle
 
         self.jetracer_msg_mutex.release()
-
-    '''
-    DEPRECIATED - waiting on jetracer_msg is bad because I could enter a state in BRT
-                - while waiting for a control
-                - prioritize safety over user control
-    def controller_callback(self, jetracer_msg):
-        start_time = time.time()
-        ts_msg = rospy.wait_for_message(VICON_CAR_TOPIC, TransformStamped)
-        end_time = time.time()
-        rospy.loginfo("eslapted time (s) {}".format(end_time - start_time))
-
-        if self.prev_ts_vicon_msg_timestamp == None:
-            current_time = rospy.Time().now().to_sec()
-            self.prev_ts_vicon_msg_timestamp = current_time
-
-        # get state of jetracer
-        pose = ts_msg.transform
-
-        theta = self.calculate_heading(pose)
-        rospy.loginfo("theta: {}".format(theta))
-        position = self.Position(x=pose.translation.x, y=pose.translation.y)
-        velocity = self.calculate_velocity(position)
-
-        state = (position.x, position.y, velocity, theta)
-        i, j, k, l = self.grid.get_index(state)
-        """
-        rospy.loginfo("x: {} y: {}, v: {}, theta: {}".format(
-            self.grid.__grid_points[0][i],
-            self.grid.__grid_points[1][j],
-            self.grid.__grid_points[2][k],
-            self.grid.__grid_points[3][l]))
-        """
-
-        # LOOK HERE
-        dV_dx3_L, dV_dx3_R = self.spa_derivX3_4d(i, j, k, l, self.V, self.grid)
-        dV_dx4_L, dV_dx4_R = self.spa_derivX4_4d(i, j, k, l, self.V, self.grid)
-
-        dV_dx3 = (dV_dx3_L + dV_dx3_R) / 2
-        dV_dx4 = (dV_dx4_L + dV_dx4_R) / 2
-
-        # rospy.loginfo("theta: " + str(theta))
-        # rospy.loginfo("speed: " + str(velocity))
-
-        value = self.grid.get_value(self.V, state)
-        rospy.loginfo("value: {}".format(value))
-        if value < 0.1:
-            rospy.logwarn("optimal control taking over!")
-            rospy.logwarn(
-                "x: {} y: {}, v: {}, theta: {}".format(
-                    state[0], state[1], state[2], state[3]
-                )
-            )
-            opt_a, opt_w = self.car.opt_ctrl(state, (0, 0, dV_dx3, dV_dx4))
-            rospy.loginfo("opt a: {} opt w: {}".format(opt_a, opt_w))
-            jetracer_msg = JetRacerCarMsg()
-            jetracer_msg.throttle = state[2] + 0.2 * opt_a
-            jetracer_msg.throttle = max(jetracer_msg.throttle, 10.0)
-            jetracer_msg.throttle = min(jetracer_msg.throttle, 35.0)
-            jetracer_msg.steerAngle = opt_w
-
-        self.publisher.publish(jetracer_msg)
-    '''
 
     def calculate_heading(self, pose):
         x = pose.rotation.x
@@ -343,6 +292,7 @@ class Controller:
 
     def in_bound(self, state):
         return (-3.0 <= state[0] <= 3.0) and (-1.0 <= state[1] <= 4.0)
+
     def callback(self, ts_msg):
         if self.prev_ts_vicon_msg_timestamp == None:
             current_time = rospy.Time().now().to_sec()
@@ -357,17 +307,7 @@ class Controller:
         pose = ts_msg.transform
         theta = self.calculate_heading(pose)
         position = self.Position(x=pose.translation.x, y=pose.translation.y)
-        # prev_v = self.prev_velocity
         velocity = self.calculate_velocity(position)
-        # rospy.loginfo("prev velocity: {}".format(self.prev_velocity))
-        # rospy.loginfo("acc: {}".format(acc))
-        # current_time = rospy.Time().now().to_sec()
-        # delta_time = current_time - self.prev_ts_vicon_msg_timestamp
-        # if delta_time > 0.01:
-        #     acc = (velocity - prev_v) / 0.01
-        #     rospy.logwarn("acc: {}".format(acc))
-        # rospy.loginfo("theta: {}".format(theta))
-        # return
         state = (position.x, position.y, velocity, theta)
         i, j, k, l = self.grid.get_index(state)
 
@@ -379,26 +319,22 @@ class Controller:
             self.grid._Grid__grid_points[2][k],
             self.grid._Grid__grid_points[3][l]))
 
-        '''
-        rospy.loginfo(
-            "x: {} y: {}, v: {}, theta: {}".format(
-                state[0], state[1], state[2], state[3]
-            )
-        )
-        '''
 
+        self.V_mutex.aquire()
         value = self.grid.get_value(self.V, state)
-        # rospy.loginfo("value: {}".format(value))
-        # rospy.loginfo("optimal takeover: {}".format(self.optimal_takeover))
+        self.V_mutex.release()
 
         current_time = rospy.Time().now().to_nsec()
         delta_time = current_time - self.optimal_timestamp
+
         # if we near the bonudary, allow optimal control to take over for 0.5 seconds
         # before handing control back to user
         # near the bonudary of BRT, apply optimal control
         if value <= self.boundary_epsilon and self.in_bound(state):
+            self.V_mutex.aquire()
             dV_dx3_L, dV_dx3_R = self.spa_derivX3_4d(i, j, k, l, self.V, self.grid)
             dV_dx4_L, dV_dx4_R = self.spa_derivX4_4d(i, j, k, l, self.V, self.grid)
+            self.V_mutex.release()
 
             dV_dx3 = (dV_dx3_L + dV_dx3_R) / 2
             dV_dx4 = (dV_dx4_L + dV_dx4_R) / 2
@@ -458,12 +394,6 @@ class Controller:
             # rospy.loginfo("throttle: {} steerAngle: {}".format(jetracer_msg.throttle, jetracer_msg.steerAngle))
             self.publisher.publish(self.optimal_msg)
         else:
-            '''
-            jetracer_msg = rospy.wait_for_message(
-                KEYBOARD_CONTROL_TOPIC, JetRacerCarMsg, timeout=0.01
-            )
-            rospy.loginfo("receiv control")
-            '''
             if self.play_sound == False:
                 self.play_sound = True
 
