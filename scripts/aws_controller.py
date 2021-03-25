@@ -53,20 +53,10 @@ class Controller:
         self.Position = namedtuple("Position", "x y")
         self.prev_position = self.Position(x=0.0, y=0.0)
         self.prev_velocity = 0.0
-
-        self.optimal_takeover = False
-        self.optimal_timestamp = rospy.Time().now().to_sec()
         self.optimal_msg = JetRacerCarMsg()
-        self.jetracer_msg = JetRacerCarMsg()
-
         # Protect the V function
         self.V_mutex = Lock()
-
         self.boundary_epsilon = 0.15
-
-        # play a sound when optimal control takes over
-        self.play_sound = True
-
         self.velocity_index = np.linspace(2.0, 4.0, 10)
 
         while not rospy.is_shutdown():
@@ -149,7 +139,6 @@ class Controller:
         self.V_mutex.release()
 
         current_time = rospy.Time().now().to_nsec()
-        #delta_time = current_time - self.optimal_timestamp
 
         # if we near the bonudary, allow optimal control to take over for 0.5 seconds
         # before handing control back to user
@@ -192,7 +181,6 @@ class Controller:
                 rospy.loginfo("throttle: {} steerAngle: {} {}".format(jetracer_msg.throttle, jetracer_msg.steerAngle, "left"))
             else:
                 rospy.loginfo("throttle: {} steerAngle: {} {}".format(jetracer_msg.throttle, jetracer_msg.steerAngle, "right"))
-            self.optimal_timestamp = rospy.Time().now().to_nsec()
             self.optimal_msg.throttle = jetracer_msg.throttle
             self.optimal_msg.steerAngle = jetracer_msg.steerAngle
             self.optimal_msg.take_over = True
