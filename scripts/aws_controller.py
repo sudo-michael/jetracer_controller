@@ -4,12 +4,11 @@ import tf
 import numpy as np
 from geometry_msgs.msg import TransformStamped
 from jetracer_controller.msg import optCtrl as JetRacerCarMsg
-#from sensor_msgs.msg import Joy
 from collections import namedtuple
-import math
-import time
 from threading import Lock
 import subprocess
+
+# Pybind executable
 import newexample
 
 from car4D import DubinsCar4D
@@ -25,8 +24,8 @@ DEBUG = False
 
 class Controller:
     def __init__(self):
-        rospy.init_node("jetracer_controller_node")
-        rospy.loginfo("starting jetracer controller node...")
+        rospy.init_node("aws_controller_node")
+        rospy.loginfo("starting AWS controller node...")
 
         # Listens to Vicon
         rospy.loginfo("starting subscriber for {}".format(VICON_CAR_TOPIC))

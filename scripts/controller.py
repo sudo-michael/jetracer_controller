@@ -397,8 +397,6 @@ class Controller:
             if self.play_sound == False:
                 self.play_sound = True
 
-
-
             self.jetracer_msg_mutex.acquire()
 
             self.publisher.publish(self.jetracer_msg)
