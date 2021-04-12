@@ -260,8 +260,8 @@ class Controller:
         # with drones
         # rotation_quaternion = tf.transformations.quaternion_from_euler(0, 0, math.pi/4)
         # rotation_quaternion = tf.transformations.quaternion_from_euler(0, 0, -math.pi/8)
-        rotation_quaternion = tf.transformations.quaternion_from_euler(0, 0, 0)
-        # rotation_quaternion = tf.transformations.quaternion_from_euler(0, 0, math.pi)
+        # rotation_quaternion = tf.transformations.quaternion_from_euler(0, 0, 0)
+        rotation_quaternion = tf.transformations.quaternion_from_euler(0, 0, math.pi)
         # rotation_quaternion = tf.transformations.quaternion_from_euler(0, 0, -math.pi)
 
         quaternion = tf.transformations.quaternion_multiply(
