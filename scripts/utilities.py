@@ -1,7 +1,8 @@
 import numpy as np
+import math
 
 def spa_derivX4_4d(
-        self, i, j, k, l, V, g
+        i, j, k, l, V, g
 ):  # Left -> right == Outer Most -> Inner Most
     left_deriv = 0.0
     right_deriv = 0.0
@@ -42,7 +43,7 @@ def spa_derivX4_4d(
 
 
 def spa_derivX3_4d(
-        self, i, j, k, l, V, g
+        i, j, k, l, V, g
 ):  # Left -> right == Outer Most -> Inner Most
     left_deriv = 0.0
     right_deriv = 0.0

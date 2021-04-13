@@ -1,38 +1,53 @@
-#!/usr/bin/env python2
+#!/usr/bin/env python3
 import rospy
-import tf
+
 import numpy as np
 from geometry_msgs.msg import TransformStamped
 from jetracer_controller.msg import optCtrl as JetRacerCarMsg
 from collections import namedtuple
 from threading import Lock
 import subprocess
+import math
 
 # Pybind executable
 import newexample
 
+#import tf
 from car4D import DubinsCar4D
 from grid import *
 from utilities import *
+from tf_utilities import * 
 
-VICON_CAR_TOPIC = "vicon/jetracer_1/jetracer_1"
+import message_filters
+
+VICON_CAR_TOPIC = "vicon/jetracer/jetracer"
 # TODO: Correct this topic name
 VICON_OBSTACLES_TOPIC = "vicon/cones"
 OPTIMAL_CONTROL_TOPIC = "/jetRacer_optControl"
+VICON_CONE1_TOPIC = "/vicon/cone_1/cone_1"
+VICON_CONE2_TOPIC = "/vicon/cone_2/cone_2"
 
 DEBUG = False
+
+RADIUS = 0.75
 
 class Controller:
     def __init__(self):
         rospy.init_node("aws_controller_node")
         rospy.loginfo("starting AWS controller node...")
+        rospy.loginfo("Please make sure that FPGA Image has been loaded")
 
+        rotation_quaternion = quaternion_from_euler(0, 0, 0)
         # Listens to Vicon
         rospy.loginfo("starting subscriber for {}".format(VICON_CAR_TOPIC))
         # This subscriber sends back opt control based on V
         rospy.Subscriber(VICON_CAR_TOPIC, TransformStamped, self.callback, queue_size=1)
         # This subscriber update the V function
-        rospy.Subscriber(VICON_OBSTACLES_TOPIC, TransformStamped, self.UpdateV, queue_size=1)
+        #rospy.Subscriber(VICON_OBSTACLES_TOPIC, TransformStamped, self.UpdateV, queue_size=1)
+        c1 = message_filters.Subscriber(VICON_CONE1_TOPIC, TransformStamped)
+        c2 = message_filters.Subscriber(VICON_CONE2_TOPIC, TransformStamped)
+        ts = message_filters.TimeSynchronizer([c1, c2], 1)
+        ts.registerCallback(self.UpdateV)
 
         # Publish optimal control to car
         self.publisher = rospy.Publisher(
@@ -58,6 +73,15 @@ class Controller:
         self.V_mutex = Lock()
         self.boundary_epsilon = 0.15
         self.velocity_index = np.linspace(2.0, 4.0, 10)
+        rospy.loginfo("Initializing the FPGA")
+        newexample.InitializeFPGA()
+
+        self.prev_coordinate = [[0.0, 0.0], [0.0, 0.0]]
+        self.compute_new = True
+        # Just to test
+        #test_coordinates = [[1.4, 2.15], [0.0, 1.0], [-1.9, 1.55]]
+        #test_radius_list = [0.5, 0.5, 0.5]
+        #newexample.hjsolver_test(test_coordinates, test_radius_list)
 
         while not rospy.is_shutdown():
             rospy.spin()
@@ -73,15 +97,15 @@ class Controller:
         # with drones
         # rotation_quaternion = tf.transformations.quaternion_from_euler(0, 0, math.pi/4)
         # rotation_quaternion = tf.transformations.quaternion_from_euler(0, 0, -math.pi/8)
-        rotation_quaternion = tf.transformations.quaternion_from_euler(0, 0, 0)
-        # rotation_quaternion = tf.transformations.quaternion_from_euler(0, 0, math.pi)
+        #rotation_quaternion = quaternion_from_euler(0, 0, 0)
+        rotation_quaternion = quaternion_from_euler(0, 0, math.pi)
         # rotation_quaternion = tf.transformations.quaternion_from_euler(0, 0, -math.pi)
 
-        quaternion = tf.transformations.quaternion_multiply(
+        quaternion = quaternion_multiply(
             rotation_quaternion, quaternion
         )
 
-        roll, pitch, yaw = tf.transformations.euler_from_quaternion(quaternion)
+        roll, pitch, yaw = euler_from_quaternion(quaternion)
         return yaw
 
     def calculate_velocity(self, position):
@@ -108,6 +132,7 @@ class Controller:
 
 
     def callback(self, ts_msg):
+        print("I'm here\n")
         if self.prev_ts_vicon_msg_timestamp == None:
             current_time = rospy.Time().now().to_sec()
             self.prev_ts_vicon_msg_timestamp = current_time
@@ -123,6 +148,7 @@ class Controller:
         position = self.Position(x=pose.translation.x, y=pose.translation.y)
         velocity = self.calculate_velocity(position)
         state = (position.x, position.y, velocity, theta)
+        print(state)
         i, j, k, l = self.grid.get_index(state)
 
         rospy.logdebug(
@@ -134,9 +160,9 @@ class Controller:
             self.grid._Grid__grid_points[3][l]))
 
 
-        self.V_mutex.aquire()
+        #self.V_mutex.acquire()
         value = self.grid.get_value(self.V, state)
-        self.V_mutex.release()
+        #self.V_mutex.release()
 
         current_time = rospy.Time().now().to_nsec()
 
@@ -144,10 +170,10 @@ class Controller:
         # before handing control back to user
         # near the bonudary of BRT, apply optimal control
         if value <= self.boundary_epsilon and self.in_bound(state):
-            self.V_mutex.aquire()
+            #self.V_mutex.acquire()
             dV_dx3_L, dV_dx3_R = spa_derivX3_4d(i, j, k, l, self.V, self.grid)
             dV_dx4_L, dV_dx4_R = spa_derivX4_4d(i, j, k, l, self.V, self.grid)
-            self.V_mutex.release()
+            #self.V_mutex.release()
 
             dV_dx3 = (dV_dx3_L + dV_dx3_R) / 2
             dV_dx4 = (dV_dx4_L + dV_dx4_R) / 2
@@ -188,19 +214,41 @@ class Controller:
             # No change to optimal_msg
             self.optimal_msg.take_over = False
 
+        #print(self.optimal_msg)
         # Publish optimal control
         self.publisher.publish(self.optimal_msg)
 
-    def UpdateV(self, obstacles):
+    def sqrt_dist(self, point1, point2):
+        x_diff_sq = (point1[0] - point2[0]) * (point1[0] - point2[0])
+        y_diff_sq = (point1[1] - point2[1]) * (point1[1] - point2[1])
+        return math.sqrt(x_diff_sq + y_diff_sq)
+
+    def isSame(self, coordinates1, coordinates2):
+        if self.sqrt_dist(coordinates1[0], coordinates2[0]) >= 0.1 or self.sqrt_dist(coordinates1[1], coordinates2[1]) >= 0.1:
+            return False
+        return True
+    # Using only 2 cones for now
+    def UpdateV(self, cone1, cone2):
         # TODO: Extract obstacle coordinates to
         # coordinates = [[1.4, 2.15], [0.0, 1.0], [-1.9, 1.55]]
-        radius_list = [0.75, 0.75, 0.75]
+        cone1_pose = cone1.transform.translation
+        cone2_pose = cone2.transform.translation
+        print("Updating V\n")
+        #print("x={} y={}".format(cone1_pose.x, cone1_pose.y))
+        #print("x={} y={}".format(cone2_pose.x, cone2_pose.y))
+
+        coordinates = [[cone1_pose.x, cone1_pose.y], [cone2_pose.x, cone2_pose.y]]
+        radius_list = [RADIUS, RADIUS]
 
         # Update value function - Pass obstacle list to FPGA computation
-        tmp_V = newexample.hjsolver_test(coordinates, radius_list)
-        self.V_mutex.aquire()
-        self.V = tmp_V
-        self.V_mutex.release()
+        #newexample.InitializeFPGA()
+        if self.isSame(coordinates, self.prev_coordinate):
+            tmp_V = newexample.hjsolver_test(coordinates, radius_list)
+            self.prev_coordinate  = coordinates
+            self.V = np.reshape(tmp_V, (60,60,20,36))
+        #self.V_mutex.acquire()
+        #self.V = np.reshape(tmp_V, (60,60,20,36))
+        #self.V_mutex.release()
 
 
 
