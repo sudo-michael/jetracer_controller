@@ -37,7 +37,6 @@ class Controller:
         rospy.loginfo("starting AWS controller node...")
         rospy.loginfo("Please make sure that FPGA Image has been loaded")
 
-        rotation_quaternion = quaternion_from_euler(0, 0, 0)
         # Listens to Vicon
         rospy.loginfo("starting subscriber for {}".format(VICON_CAR_TOPIC))
         # This subscriber sends back opt control based on V
@@ -249,8 +248,6 @@ class Controller:
         #self.V_mutex.acquire()
         #self.V = np.reshape(tmp_V, (60,60,20,36))
         #self.V_mutex.release()
-
-
 
 def main():
     try:

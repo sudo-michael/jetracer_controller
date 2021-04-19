@@ -60,6 +60,11 @@ void my_linspace(float lb, float mb, float A[], int dim);
 void Initialize_V(int* A, vector<vector<float>> obstacle_positions, vector<float> radius);
 int add(int i, int j);
 
+pci_bar_handle_t pci_bar_handle = PCI_BAR_HANDLE_INIT;
+int pf_id = 0;
+int bar_id = 0;
+int fpga_attach_flags = 0;
+int slot_id = 0;
 
 /*
 int main(int argc, char **argv) {
@@ -182,23 +187,14 @@ out:
 }
 
 py::array_t<float> hjsolver_test(vector<vector<float>> obstacle_positions, vector<float> radius) {
-    int slot_id = 0;
     int rc_control;
     int rc_memory;
-    pci_bar_handle_t pci_bar_handle = PCI_BAR_HANDLE_INIT;
-    int pf_id = 0;
-    int bar_id = 0;
-    int fpga_attach_flags = 0;
+
     uint32_t in_hi_addr, in_lo_addr;
     uint32_t out_hi_addr, out_lo_addr;
     uint32_t cycle_count = 0;
     uint32_t control_reg = 0;
 
-    rc_control = fpga_pci_attach(slot_id, pf_id, bar_id, fpga_attach_flags, &pci_bar_handle);
-    if(rc_control != 0) cout << "Unable to attach to the AFI on slot id " <<  slot_id << endl;
-    //fail_on(rc_control, out, "Unable to attach to the AFI on slot id %d", slot_id);
-
-    
     //Variables for read/write data through DMA
     int write_fd, read_fd;
     read_fd = -1;
@@ -344,18 +340,6 @@ py::array_t<float> hjsolver_test(vector<vector<float>> obstacle_positions, vecto
     flag = false;
     int count_nz;
     count_nz= 0;
-    
-    // Write into file
-    //FILE *fp;
-
-    //if((fp=fopen("result_V.txt", "wb"))==NULL) {
-    //  cout << "Cannot open file.\n";
-    //}
-
-    //if(fwrite(read_buffer, sizeof(int), buffer_size, fp) != buffer_size)
-    //  cout << "File read error.\n";
-    //fclose(fp);
-
 
     //py::array_t<float> result;
     auto result = py::array_t<float>(buffer_size);
@@ -488,6 +472,10 @@ void InitializeFPGA(){
 
   rc = check_slot_config(slot_id);
   if(rc != 0) cout << "slot config is not correct\n";
+
+  rc = fpga_pci_attach(slot_id, pf_id, bar_id, fpga_attach_flags, &pci_bar_handle);
+  if(rc != 0) cout << "Unable to attach to the AFI on slot id " <<  slot_id << endl;
+   //fail_on(rc_control, out, "Unable to attach to the AFI on slot id %d", slot_id);
 
   //log_info("TEST %s", (rc == 0) ? "PASSED" : "FAILED");
   if(rc == 0) cout << "PASSED\n";

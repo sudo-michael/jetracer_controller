@@ -169,6 +169,14 @@ include_directories(
    scripts/car_controller.py
    DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
  )
+ catkin_install_python(PROGRAMS
+   scripts/fake_car_publisher.py
+   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
+ )
+ catkin_install_python(PROGRAMS
+   scripts/fake_vicon_publisher.py
+   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
+ )
 
 ## Mark executables for installation
 ## See http://docs.ros.org/melodic/api/catkin/html/howto/format1/building_executables.html
