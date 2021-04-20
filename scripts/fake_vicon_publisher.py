@@ -15,10 +15,11 @@ def talker():
     while not rospy.is_shutdown():
         cone1_pose = TransformStamped()
         cone2_pose = TransformStamped()
-        cone1_pose.transform.translation.x = 2.0
-        cone1_pose.transform.translation.y = -2.0
-        cone2_pose.transform.translation.x = 2.0
-        cone2_pose.transform.translation.y = -2.0
+        #[1.4, 2.15], [0.0, 1.0]
+        cone1_pose.transform.translation.x = 1.4
+        cone1_pose.transform.translation.y = 2.15
+        cone2_pose.transform.translation.x = 0.0
+        cone2_pose.transform.translation.y = 1.0
         pub1.publish(cone1_pose)
         pub2.publish(cone2_pose)
         rate.sleep()

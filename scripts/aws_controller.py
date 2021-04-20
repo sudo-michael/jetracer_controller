@@ -8,6 +8,9 @@ from collections import namedtuple
 from threading import Lock
 import subprocess
 import math
+import threading
+from multiprocessing import Process, Queue
+
 
 # Pybind executable
 import newexample
@@ -40,12 +43,12 @@ class Controller:
         # Listens to Vicon
         rospy.loginfo("starting subscriber for {}".format(VICON_CAR_TOPIC))
         # This subscriber sends back opt control based on V
-        rospy.Subscriber(VICON_CAR_TOPIC, TransformStamped, self.callback, queue_size=1)
+        rospy.Subscriber(VICON_CAR_TOPIC, TransformStamped, self.callback, queue_size=10)
         # This subscriber update the V function
         #rospy.Subscriber(VICON_OBSTACLES_TOPIC, TransformStamped, self.UpdateV, queue_size=1)
         c1 = message_filters.Subscriber(VICON_CONE1_TOPIC, TransformStamped)
         c2 = message_filters.Subscriber(VICON_CONE2_TOPIC, TransformStamped)
-        ts = message_filters.TimeSynchronizer([c1, c2], 1)
+        ts = message_filters.TimeSynchronizer([c1, c2], queue_size=20)
         ts.registerCallback(self.UpdateV)
 
         # Publish optimal control to car
@@ -75,13 +78,10 @@ class Controller:
         rospy.loginfo("Initializing the FPGA")
         newexample.InitializeFPGA()
 
-        self.prev_coordinate = [[0.0, 0.0], [0.0, 0.0]]
+        self.coordinate_list = [[0.0, 0.0], [0.0, 0.0]]
         self.compute_new = True
-        # Just to test
-        #test_coordinates = [[1.4, 2.15], [0.0, 1.0], [-1.9, 1.55]]
-        #test_radius_list = [0.5, 0.5, 0.5]
-        #newexample.hjsolver_test(test_coordinates, test_radius_list)
-
+        
+        #self.p = Process(target=self.computeValueFunc)
         while not rospy.is_shutdown():
             rospy.spin()
 
@@ -128,10 +128,21 @@ class Controller:
 
     def in_bound(self, state):
         return (-3.0 <= state[0] <= 3.0) and (-1.0 <= state[1] <= 4.0)
+    
+    def computeValueFunc(self, my_list, q):
+        # Update value function - Pass obstacle list to FPGA computation
+        radius_list = [RADIUS, RADIUS]
+        #coordinate_lissst = [[1.4, 2.3], [0.0, 0.0]]
+        tmp_V = newexample.hjsolver_test(my_list, radius_list)
+        q.put(tmp_V)
+        #self.V_mutex.acquire()
+        #self.V = np.reshape(tmp_V, (60,60,20,36))
+        #self.V_mutex.release()
 
 
     def callback(self, ts_msg):
-        print("I'm here\n")
+        #print("I'm here\n")
+        #print(threading.current_thread())
         if self.prev_ts_vicon_msg_timestamp == None:
             current_time = rospy.Time().now().to_sec()
             self.prev_ts_vicon_msg_timestamp = current_time
@@ -147,16 +158,16 @@ class Controller:
         position = self.Position(x=pose.translation.x, y=pose.translation.y)
         velocity = self.calculate_velocity(position)
         state = (position.x, position.y, velocity, theta)
-        print(state)
+        #print(state)
         i, j, k, l = self.grid.get_index(state)
 
-        rospy.logdebug(
-            "car's location on the grid\n \
-            x: {} y: {}, v: {}, theta: {}".format(
-            self.grid._Grid__grid_points[0][i],
-            self.grid._Grid__grid_points[1][j],
-            self.grid._Grid__grid_points[2][k],
-            self.grid._Grid__grid_points[3][l]))
+        #rospy.logdebug(
+        #    "car's location on the grid\n \
+        #    x: {} y: {}, v: {}, theta: {}".format(
+        #    self.grid._Grid__grid_points[0][i],
+        #    self.grid._Grid__grid_points[1][j],
+        #    self.grid._Grid__grid_points[2][k],
+        #    self.grid._Grid__grid_points[3][l]))
 
 
         #self.V_mutex.acquire()
@@ -201,11 +212,11 @@ class Controller:
             # +steerAngle -> turn cw
             jetracer_msg.steerAngle = -1 * opt_w
 
-            rospy.logwarn("optimal control taking over!")
-            if jetracer_msg.steerAngle < 0:
-                rospy.loginfo("throttle: {} steerAngle: {} {}".format(jetracer_msg.throttle, jetracer_msg.steerAngle, "left"))
-            else:
-                rospy.loginfo("throttle: {} steerAngle: {} {}".format(jetracer_msg.throttle, jetracer_msg.steerAngle, "right"))
+            #rospy.logwarn("optimal control taking over!")
+            #if jetracer_msg.steerAngle < 0:
+            #    rospy.loginfo("throttle: {} steerAngle: {} {}".format(jetracer_msg.throttle, jetracer_msg.steerAngle, "left"))
+            #else:
+            #    rospy.loginfo("throttle: {} steerAngle: {} {}".format(jetracer_msg.throttle, jetracer_msg.steerAngle, "right"))
             self.optimal_msg.throttle = jetracer_msg.throttle
             self.optimal_msg.steerAngle = jetracer_msg.steerAngle
             self.optimal_msg.take_over = True
@@ -226,28 +237,31 @@ class Controller:
         if self.sqrt_dist(coordinates1[0], coordinates2[0]) >= 0.1 or self.sqrt_dist(coordinates1[1], coordinates2[1]) >= 0.1:
             return False
         return True
+    
     # Using only 2 cones for now
     def UpdateV(self, cone1, cone2):
+        print(threading.current_thread())
         # TODO: Extract obstacle coordinates to
         # coordinates = [[1.4, 2.15], [0.0, 1.0], [-1.9, 1.55]]
         cone1_pose = cone1.transform.translation
         cone2_pose = cone2.transform.translation
-        print("Updating V\n")
+        #print("Updating V\n")
         #print("x={} y={}".format(cone1_pose.x, cone1_pose.y))
         #print("x={} y={}".format(cone2_pose.x, cone2_pose.y))
+        self.coordinate_list = [[cone1_pose.x, cone1_pose.y], [cone2_pose.x, cone2_pose.y]]
+        # Call another thread, fuck ROS
+        #x = threading.Thread(target = self.computeValueFunc)
+        #x.daemon = True
+        #x.start()
+        #print("FUkck\n")
+        #x.join()
+        q = Queue()
+        p = Process(target=self.computeValueFunc, args=(self.coordinate_list, q))
+        p.start()
+        self.V = q.get()
+        print(sum(self.V < 0))
+        p.join() # wait for previous call to finish
 
-        coordinates = [[cone1_pose.x, cone1_pose.y], [cone2_pose.x, cone2_pose.y]]
-        radius_list = [RADIUS, RADIUS]
-
-        # Update value function - Pass obstacle list to FPGA computation
-        #newexample.InitializeFPGA()
-        if self.isSame(coordinates, self.prev_coordinate):
-            tmp_V = newexample.hjsolver_test(coordinates, radius_list)
-            self.prev_coordinate  = coordinates
-            self.V = np.reshape(tmp_V, (60,60,20,36))
-        #self.V_mutex.acquire()
-        #self.V = np.reshape(tmp_V, (60,60,20,36))
-        #self.V_mutex.release()
 
 def main():
     try:

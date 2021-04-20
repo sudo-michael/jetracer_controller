@@ -53,6 +53,6 @@ class Grid:
 
     def get_value(self, V, state):
         index = self.get_index(state)
-        print(index)
+        #print(index)
         return V[tuple(index)]
 

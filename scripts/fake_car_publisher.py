@@ -11,8 +11,8 @@ def talker():
     rate = rospy.Rate(100) # 10hz
     while not rospy.is_shutdown():
         car_pose = TransformStamped()
-        car_pose.transform.translation.x = 1.0
-        car_pose.transform.translation.y = -1.0
+        car_pose.transform.translation.x = 1.4
+        car_pose.transform.translation.y = 2.15
         pub.publish(car_pose)
         rate.sleep()
 
