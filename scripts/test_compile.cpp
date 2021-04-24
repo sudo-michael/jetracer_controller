@@ -112,6 +112,7 @@ out:
     return rc;
 }*/
 
+
 void usage(const char* program_name) {
   printf("usage: %s [--slot <slot>]\n", program_name);
 }
@@ -131,12 +132,12 @@ int dma_example(int slot_id, size_t buffer_size) {
 
   read_fd = fpga_dma_open_queue(FPGA_DMA_XDMA, slot_id,
 				/*channel*/ 0, /*is_read*/ true);
-  cout << "read_fd " << read_fd << endl;
+  //cout << "read_fd " << read_fd << endl;
   fail_on((rc = (read_fd < 0) ? -1 : 0), out, "unable to open read dma queue");
 
   write_fd = fpga_dma_open_queue(FPGA_DMA_XDMA, slot_id,
         /*channel*/ 0, /*is_read*/ false);
-  cout << "write_fd " << write_fd << endl;
+  //cout << "write_fd " << write_fd << endl;
   fail_on((rc = (write_fd < 0) ? -1 : 0), out, "unable to open write dma queue");
 
   rc = fill_buffer_ones(write_buffer, buffer_size);
@@ -187,6 +188,9 @@ out:
 }
 
 py::array_t<float> hjsolver_test(vector<vector<float>> obstacle_positions, vector<float> radius) {
+    //cout << "Hello\n";
+    py::gil_scoped_release release;
+    //cout << "hello twice\n";
     int rc_control;
     int rc_memory;
 
@@ -195,6 +199,7 @@ py::array_t<float> hjsolver_test(vector<vector<float>> obstacle_positions, vecto
     uint32_t cycle_count = 0;
     uint32_t control_reg = 0;
 
+    clock_t begin ;
     //Variables for read/write data through DMA
     int write_fd, read_fd;
     read_fd = -1;
@@ -206,7 +211,7 @@ py::array_t<float> hjsolver_test(vector<vector<float>> obstacle_positions, vecto
     int *write_buffer;
     write_buffer = (int *) malloc(buffer_size * sizeof(uint32_t));    
 
-    Initialize_V((int *)write_buffer, obstacle_positions, radius);
+
     // Print 60 values
     //for(int i = 0; i < 60; i++){ // along x direction
     //  cout << write_buffer([i*60*20*36 + 30*20*36]) << " " ;
@@ -216,15 +221,23 @@ py::array_t<float> hjsolver_test(vector<vector<float>> obstacle_positions, vecto
 
     int *read_buffer;
     read_buffer= (int *) malloc(buffer_size * sizeof(uint32_t));
-    
+
     if (write_buffer == NULL || read_buffer == NULL) {
         rc_memory = -ENOMEM;
         //goto out;
     }
     // Write to DMA buffer
     //rc_memory = fill_buffer_urandom(write_buffer, buffer_size);
+    clock_t diff;
+    double time_spent;
 
+    begin = clock();
+    Initialize_V((int *)write_buffer, obstacle_positions, radius);
+    diff = clock() - begin;
+    time_spent= (double ) diff/ CLOCKS_PER_SEC;
+    cout << "time taken " <<  time_spent << endl;
     // Open the channel
+    
     read_fd = fpga_dma_open_queue(FPGA_DMA_XDMA, slot_id,
         /*channel*/ 0, /*is_read*/ true);
     //fail_on((rc_memory = (read_fd < 0) ? -1 : 0), out, "unable to open read dma queue");
@@ -233,7 +246,7 @@ py::array_t<float> hjsolver_test(vector<vector<float>> obstacle_positions, vecto
         /*channel*/ 0, /*is_read*/ false);
     //fail_on((rc_memory = (write_fd < 0) ? -1 : 0), out, "unable to open write dma queue");
     //fail_on(rc_memory, out, "unabled to initialize buffer");
-
+    
     // Write to dram through DMA
     rc_memory = fpga_dma_burst_write(write_fd, (uint8_t *) write_buffer, buffer_size * sizeof(int), 0);
     //fail_on(rc_memory, out, "DMA write failed");
@@ -243,9 +256,9 @@ py::array_t<float> hjsolver_test(vector<vector<float>> obstacle_positions, vecto
 
     rc_memory = fpga_dma_burst_write(write_fd, (uint8_t *) read_buffer, buffer_size * sizeof(int), 0x10000000);
     //fail_on(rc_memory, out, "DMA write failed");
-
+    
     log_info("Starting AXI Master to DDR test");
-    cout << "Starting AXI Master to DDR test\n";
+    //cout << "Starting AXI Master to DDR test\n";
     /* Initializing control registers
      * Register File.
      * Six 32-bit register file.
@@ -286,10 +299,10 @@ py::array_t<float> hjsolver_test(vector<vector<float>> obstacle_positions, vecto
     out_lo_addr = 0x10000000;
 
     /* write a value into the mapped address space */
-    cout <<"Initializing dandelion accelerator:\n";
-
+    //cout <<"Initializing dandelion accelerator:\n";
+    
 //printf("Writing 0x%08x to Dandelion in lsb register (0x%016lx)\n\n", in_lo_addr, ccr_in_lsb); 
-    cout << "writing to lsb register";
+    //cout << "writing to lsb register";
     rc_control = fpga_pci_poke(pci_bar_handle, ccr_in_lsb, in_lo_addr);
     //fail_on(rc_control, out, "Unable to write to the fpga !");
 
@@ -307,30 +320,25 @@ py::array_t<float> hjsolver_test(vector<vector<float>> obstacle_positions, vecto
     //fail_on(rc_control, out, "Unable to write to the fpga !");
 
 //printf("Launching -- Writing 0x1 to dandelion ctrl register:\n");
-    cout << "Launching -- Writing 0x1 to dandelion ctrl register:\n";
+    //cout << "Launching -- Writing 0x1 to dandelion ctrl register:\n";
+    
     rc_control = fpga_pci_poke(pci_bar_handle, ccr_control, 0x1);
     //fail_on(rc_control, out, "Unable to write to the fpga !");
 
-    clock_t begin ;
-    begin = clock(); 
+    //begin = clock(); 
     do{
         rc_control = fpga_pci_peek(pci_bar_handle, ccr_control, &control_reg);
         //fail_on(rc_control, out, "Unable to read read from the fpga !");
 	} while(control_reg != 2);
   
-    clock_t diff;
-    diff = clock() - begin;
-    double time_spent;
-    time_spent= (double ) diff/ CLOCKS_PER_SEC;
-
     rc_control = fpga_pci_peek(pci_bar_handle, ccr_cycle, &cycle_count);
     //fail_on(rc_memory, out, "Unable to read read from the fpga !");
-    cout << "Execution finished in [ %d ] cycle\n" <<  cycle_count << endl;
+    //cout << "Execution finished in [ %d ] cycle\n" <<  cycle_count << endl;
 
     // rc = axi_mstr_ddr_access(slot_id, pci_bar_handle, ddr_hi_addr, ddr_lo_addr, ddr_data);
     // fail_on(rc, out, "Unable to access DDR A.");
     
-    cout << "time taken " <<  time_spent << endl;
+    //cout << "time taken " <<  time_spent << endl;
 
     // Read from dram
     rc_memory = fpga_dma_burst_read(read_fd, (uint8_t *) read_buffer, buffer_size * sizeof(int), 0x10000000);
@@ -340,12 +348,15 @@ py::array_t<float> hjsolver_test(vector<vector<float>> obstacle_positions, vecto
     flag = false;
     int count_nz;
     count_nz= 0;
-
+    
     //py::array_t<float> result;
+    py::gil_scoped_acquire acquire;
     auto result = py::array_t<float>(buffer_size);
+    
     py::buffer_info buf = result.request();
+    
     float *ptr1 = static_cast<float *>(buf.ptr);
-
+    
     for(uint32_t i = 0; i < buffer_size; i++){
       //printf("Buffer [%d]: %d\n", i, read_buffer[i]);
       if(read_buffer[i] <= 0) {
@@ -359,6 +370,10 @@ py::array_t<float> hjsolver_test(vector<vector<float>> obstacle_positions, vecto
       //count_nz++;
       //printf("%lf ", val_in_f);
     }
+    //diff = clock() - begin;
+    //time_spent= (double ) diff/ CLOCKS_PER_SEC;
+    //cout << "time taken " <<  time_spent << endl;
+
     if(!flag) cout << "sth might worng\n";
     cout << "count_nz is " << count_nz << endl;
 
@@ -378,7 +393,6 @@ out:
     // if there is an error code, exit with status 1
     return result;
     //return (rc_control != 0 ? (rc_memory != 0 ? 1 : 0) : 0);
-
 }
 
 
@@ -391,13 +405,13 @@ float int_to_float(int a){
   return result;
 }
 
-int float_to_int(float a){
+inline int float_to_int(float a){
   int mantissa = 27;
   int result = (int) round(a * pow(2, mantissa));
   return result;
 }
 
-void my_linspace(float lb, float mb, float A[], int dim){
+inline void my_linspace(float lb, float mb, float A[], int dim){
   float dx;
   dx  = (mb - lb) / (dim - 1);
 
@@ -431,19 +445,21 @@ void Initialize_V(int* A, vector<vector<float>> obst, vector<float> radius){
   //float r_list[3] = {0.7, 0.7, 0.7};
   int count_nz = 0;
 
-  for(int i = 0; i < x_dim; i++){
-    for(int j = 0; j < y_dim; j++){
-      for(int k = 0; k < v_dim; k++){
-	for(int l = 0; l < t_dim; l++){
-	  float min_val = 1000;
+  for(int i = 0; i < x_dim; ++i){
+    int tmp1 = i * y_dim * v_dim * t_dim;
+    for(int j = 0; j < y_dim; ++j){
+          float min_val = 1000;
 	  for(int m = 0; m < radius.size(); m++){
 	    float val_func = sqrt((y_arr[j] - obst[m][1]) * (y_arr[j] - obst[m][1]) + (x_arr[i] - obst[m][0]) * (x_arr[i] - obst[m][0])) 
 	      - radius[m];
 	    min_val = min(val_func, min_val);
 	  }
-	  //int convert_val = float_to_int(sqrt(( y_arr[j] -1.0 ) * (y_arr[j] - 1.0) + x_arr[i]*x_arr[i]) - radius);
 	  int convert_val = float_to_int(min_val);
-	  A[i * y_dim * v_dim * t_dim + j * v_dim * t_dim + k * t_dim + l] = convert_val;
+	  int tmp2 = j * v_dim * t_dim;
+      for(int k = 0; k < v_dim; ++k){
+	for(int l = 0; l < t_dim; ++l){
+	  //int convert_val = float_to_int(sqrt(( y_arr[j] -1.0 ) * (y_arr[j] - 1.0) + x_arr[i]*x_arr[i]) - radius);
+	  *(A + tmp1 + tmp2 + k * t_dim + l) = convert_val;
 	  if(min_val < 0) count_nz++;
 	}
       }
@@ -451,7 +467,7 @@ void Initialize_V(int* A, vector<vector<float>> obst, vector<float> radius){
   }
 
   //printf("count_nz before: %d\n", count_nz);
-  cout << "count_nz before " << count_nz << endl;
+  //cout << "count_nz before " << count_nz << endl;
 }
 
 int add(int i, int j) {

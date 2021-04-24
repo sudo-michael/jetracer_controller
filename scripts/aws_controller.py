@@ -9,8 +9,11 @@ from threading import Lock
 import subprocess
 import math
 import threading
-from multiprocessing import Process, Queue
+from multiprocessing import Process, Queue, Array
+import multiprocessing as mp
 
+import time
+import ctypes
 
 # Pybind executable
 import newexample
@@ -65,6 +68,7 @@ class Controller:
             [3],
         )
         self.V = np.zeros((60, 60, 20, 36))
+        
         self.car = DubinsCar4D()
         self.prev_ts_vicon_msg_timestamp = None
         self.Position = namedtuple("Position", "x y")
@@ -83,6 +87,7 @@ class Controller:
         
         #self.p = Process(target=self.computeValueFunc)
         while not rospy.is_shutdown():
+            print("Here\n")
             rospy.spin()
 
     def calculate_heading(self, pose):
@@ -129,19 +134,21 @@ class Controller:
     def in_bound(self, state):
         return (-3.0 <= state[0] <= 3.0) and (-1.0 <= state[1] <= 4.0)
     
-    def computeValueFunc(self, my_list, q):
+    def computeValueFunc(self, my_list, q):    
         # Update value function - Pass obstacle list to FPGA computation
         radius_list = [RADIUS, RADIUS]
         #coordinate_lissst = [[1.4, 2.3], [0.0, 0.0]]
-        tmp_V = newexample.hjsolver_test(my_list, radius_list)
-        q.put(tmp_V)
+        tmp = newexample.hjsolver_test(my_list, radius_list)
+        #print(V_global.shape)
+        #print(np.sum(V_global < 0))
+        q.put(tmp)
         #self.V_mutex.acquire()
         #self.V = np.reshape(tmp_V, (60,60,20,36))
         #self.V_mutex.release()
 
 
     def callback(self, ts_msg):
-        #print("I'm here\n")
+        #print("Publishing optimal control\n")
         #print(threading.current_thread())
         if self.prev_ts_vicon_msg_timestamp == None:
             current_time = rospy.Time().now().to_sec()
@@ -240,29 +247,22 @@ class Controller:
     
     # Using only 2 cones for now
     def UpdateV(self, cone1, cone2):
-        print(threading.current_thread())
-        # TODO: Extract obstacle coordinates to
-        # coordinates = [[1.4, 2.15], [0.0, 1.0], [-1.9, 1.55]]
         cone1_pose = cone1.transform.translation
         cone2_pose = cone2.transform.translation
-        #print("Updating V\n")
+        print("Updating V\n")
         #print("x={} y={}".format(cone1_pose.x, cone1_pose.y))
         #print("x={} y={}".format(cone2_pose.x, cone2_pose.y))
+#        print(np.sum(self.V < 0))
         self.coordinate_list = [[cone1_pose.x, cone1_pose.y], [cone2_pose.x, cone2_pose.y]]
-        # Call another thread, fuck ROS
-        #x = threading.Thread(target = self.computeValueFunc)
-        #x.daemon = True
-        #x.start()
-        #print("FUkck\n")
-        #x.join()
-        q = Queue()
-        p = Process(target=self.computeValueFunc, args=(self.coordinate_list, q))
-        p.start()
-        self.V = q.get()
-        print(sum(self.V < 0))
-        p.join() # wait for previous call to finish
-
-
+        
+        start = time.time()
+        radius_list = [RADIUS, RADIUS]
+        tmp = newexample.hjsolver_test(self.coordinate_list, radius_list)
+        self.V = np.reshape(tmp, (60,60,20,36))
+        end = time.time()
+        print(end - start)
+        #np.save('tmp_result.npy', self.V)
+        
 def main():
     try:
         rospy.logwarn(
