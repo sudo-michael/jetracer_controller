@@ -11,6 +11,7 @@ find_package(catkin REQUIRED COMPONENTS
   message_generation
   rospy
   std_msgs
+  geometry_msgs
 )
 
 ## System dependencies are found with CMake's conventions
@@ -166,6 +167,14 @@ include_directories(
 
  catkin_install_python(PROGRAMS
    scripts/car_controller.py
+   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
+ )
+ catkin_install_python(PROGRAMS
+   scripts/fake_car_publisher.py
+   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
+ )
+ catkin_install_python(PROGRAMS
+   scripts/fake_vicon_publisher.py
    DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
  )
 
