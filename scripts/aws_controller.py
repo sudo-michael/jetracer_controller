@@ -46,12 +46,12 @@ class Controller:
         # Listens to Vicon
         rospy.loginfo("starting subscriber for {}".format(VICON_CAR_TOPIC))
         # This subscriber sends back opt control based on V
-        rospy.Subscriber(VICON_CAR_TOPIC, TransformStamped, self.callback, queue_size=10)
+        rospy.Subscriber(VICON_CAR_TOPIC, TransformStamped, self.callback, queue_size=1)
         # This subscriber update the V function
         #rospy.Subscriber(VICON_OBSTACLES_TOPIC, TransformStamped, self.UpdateV, queue_size=1)
         c1 = message_filters.Subscriber(VICON_CONE1_TOPIC, TransformStamped)
         c2 = message_filters.Subscriber(VICON_CONE2_TOPIC, TransformStamped)
-        ts = message_filters.TimeSynchronizer([c1, c2], queue_size=20)
+        ts = message_filters.TimeSynchronizer([c1, c2], queue_size=1)
         ts.registerCallback(self.UpdateV)
 
         # Publish optimal control to car
@@ -101,8 +101,8 @@ class Controller:
         # with drones
         # rotation_quaternion = tf.transformations.quaternion_from_euler(0, 0, math.pi/4)
         # rotation_quaternion = tf.transformations.quaternion_from_euler(0, 0, -math.pi/8)
-        #rotation_quaternion = quaternion_from_euler(0, 0, 0)
-        rotation_quaternion = quaternion_from_euler(0, 0, math.pi)
+        rotation_quaternion = quaternion_from_euler(0, 0, 0)
+        #rotation_quaternion = quaternion_from_euler(0, 0, math.pi)
         # rotation_quaternion = tf.transformations.quaternion_from_euler(0, 0, -math.pi)
 
         quaternion = quaternion_multiply(
@@ -177,9 +177,10 @@ class Controller:
         #    self.grid._Grid__grid_points[3][l]))
 
 
-        #self.V_mutex.acquire()
+        self.V_mutex.acquire()
         value = self.grid.get_value(self.V, state)
-        #self.V_mutex.release()
+        print(value)
+        self.V_mutex.release()
 
         current_time = rospy.Time().now().to_nsec()
 
@@ -187,10 +188,10 @@ class Controller:
         # before handing control back to user
         # near the bonudary of BRT, apply optimal control
         if value <= self.boundary_epsilon and self.in_bound(state):
-            #self.V_mutex.acquire()
+            self.V_mutex.acquire()
             dV_dx3_L, dV_dx3_R = spa_derivX3_4d(i, j, k, l, self.V, self.grid)
             dV_dx4_L, dV_dx4_R = spa_derivX4_4d(i, j, k, l, self.V, self.grid)
-            #self.V_mutex.release()
+            self.V_mutex.release()
 
             dV_dx3 = (dV_dx3_L + dV_dx3_R) / 2
             dV_dx4 = (dV_dx4_L + dV_dx4_R) / 2
@@ -250,15 +251,30 @@ class Controller:
         cone1_pose = cone1.transform.translation
         cone2_pose = cone2.transform.translation
         print("Updating V\n")
-        #print("x={} y={}".format(cone1_pose.x, cone1_pose.y))
-        #print("x={} y={}".format(cone2_pose.x, cone2_pose.y))
-#        print(np.sum(self.V < 0))
-        self.coordinate_list = [[cone1_pose.x, cone1_pose.y], [cone2_pose.x, cone2_pose.y]]
+        print("x={} y={}".format(cone1_pose.x, cone1_pose.y))
+        print("x={} y={}".format(cone2_pose.x, cone2_pose.y))
+        #print(np.sum(self.V < 0))
+        coord_list = []
+        radius_list = []
+
+        #print(cone1_pose.z)
+        #print(cone2_pose.z)
+        if cone1_pose.z <= 1.5:
+            coord_list.append([cone1_pose.x, cone1_pose.y])
+            radius_list.append(RADIUS)
+        if cone2_pose.z <= 1.5:
+            coord_list.append([cone2_pose.x, cone2_pose.y])
+            radius_list.append(RADIUS)
+        #print(coord_list)
+        self.coordinate_list = coord_list
+        #self.coordinate_list = [[cone1_pose.x, cone1_pose.y], [cone2_pose.x, cone2_pose.y]]
         
         start = time.time()
-        radius_list = [RADIUS, RADIUS]
+        #radius_list = [RADIUS, RADIUS]
         tmp = newexample.hjsolver_test(self.coordinate_list, radius_list)
+        self.V_mutex.acquire()
         self.V = np.reshape(tmp, (60,60,20,36))
+        self.V_mutex.release()
         end = time.time()
         print(end - start)
         #np.save('tmp_result.npy', self.V)
