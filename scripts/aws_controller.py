@@ -30,12 +30,15 @@ VICON_CAR_TOPIC = "vicon/jetracer/jetracer"
 # TODO: Correct this topic name
 VICON_OBSTACLES_TOPIC = "vicon/cones"
 OPTIMAL_CONTROL_TOPIC = "/jetRacer_optControl"
-VICON_CONE1_TOPIC = "/vicon/cone_1/cone_1"
-VICON_CONE2_TOPIC = "/vicon/cone_2/cone_2"
+#VICON_CONE1_TOPIC = "/vicon/cone_1/cone_1"
+#VICON_CONE2_TOPIC = "/vicon/cone_2/cone_2"
+
+VICON_CONE1_TOPIC = "/downsampled_vicon_message1"
+VICON_CONE2_TOPIC = "/downsampled_vicon_message2"
 
 DEBUG = False
 
-RADIUS = 0.75
+RADIUS = 0.55
 
 class Controller:
     def __init__(self):
@@ -51,7 +54,8 @@ class Controller:
         #rospy.Subscriber(VICON_OBSTACLES_TOPIC, TransformStamped, self.UpdateV, queue_size=1)
         c1 = message_filters.Subscriber(VICON_CONE1_TOPIC, TransformStamped)
         c2 = message_filters.Subscriber(VICON_CONE2_TOPIC, TransformStamped)
-        ts = message_filters.TimeSynchronizer([c1, c2], queue_size=1)
+        #ts = message_filters.TimeSynchronizer([c1, c2], queue_size=2)
+        ts = message_filters.ApproximateTimeSynchronizer([c1, c2], queue_size=1, slop=0.3)
         ts.registerCallback(self.UpdateV)
 
         # Publish optimal control to car
@@ -77,12 +81,13 @@ class Controller:
         self.optimal_msg = JetRacerCarMsg()
         # Protect the V function
         self.V_mutex = Lock()
-        self.boundary_epsilon = 0.15
+        self.boundary_epsilon = 0.5
         self.velocity_index = np.linspace(2.0, 4.0, 10)
         rospy.loginfo("Initializing the FPGA")
         newexample.InitializeFPGA()
 
         self.coordinate_list = [[0.0, 0.0], [0.0, 0.0]]
+        self.prev_list = [[0.0, 0.0], [0.0, 0.0]]
         self.compute_new = True
         
         #self.p = Process(target=self.computeValueFunc)
@@ -180,19 +185,21 @@ class Controller:
         self.V_mutex.acquire()
         value = self.grid.get_value(self.V, state)
         print(value)
-        self.V_mutex.release()
+        #self.V_mutex.release()
 
         current_time = rospy.Time().now().to_nsec()
 
         # if we near the bonudary, allow optimal control to take over for 0.5 seconds
         # before handing control back to user
         # near the bonudary of BRT, apply optimal control
-        if value <= self.boundary_epsilon and self.in_bound(state):
-            self.V_mutex.acquire()
+        #if value <= self.boundary_epsilon and self.in_bound(state):
+        if value <= self.boundary_epsilon:
+            #self.V_mutex.acquire()
             dV_dx3_L, dV_dx3_R = spa_derivX3_4d(i, j, k, l, self.V, self.grid)
             dV_dx4_L, dV_dx4_R = spa_derivX4_4d(i, j, k, l, self.V, self.grid)
-            self.V_mutex.release()
+            #self.V_mutex.release()
 
+            self.optimal_msg.take_over = True
             dV_dx3 = (dV_dx3_L + dV_dx3_R) / 2
             dV_dx4 = (dV_dx4_L + dV_dx4_R) / 2
 
@@ -227,12 +234,12 @@ class Controller:
             #    rospy.loginfo("throttle: {} steerAngle: {} {}".format(jetracer_msg.throttle, jetracer_msg.steerAngle, "right"))
             self.optimal_msg.throttle = jetracer_msg.throttle
             self.optimal_msg.steerAngle = jetracer_msg.steerAngle
-            self.optimal_msg.take_over = True
         else:
             # No change to optimal_msg
             self.optimal_msg.take_over = False
 
         #print(self.optimal_msg)
+        self.V_mutex.release()
         # Publish optimal control
         self.publisher.publish(self.optimal_msg)
 
@@ -242,6 +249,8 @@ class Controller:
         return math.sqrt(x_diff_sq + y_diff_sq)
 
     def isSame(self, coordinates1, coordinates2):
+        #print(self.sqrt_dist(coordinates1[0], coordinates2[0]))
+        #print(self.sqrt_dist(coordinates1[1], coordinates2[1]))
         if self.sqrt_dist(coordinates1[0], coordinates2[0]) >= 0.1 or self.sqrt_dist(coordinates1[1], coordinates2[1]) >= 0.1:
             return False
         return True
@@ -250,9 +259,11 @@ class Controller:
     def UpdateV(self, cone1, cone2):
         cone1_pose = cone1.transform.translation
         cone2_pose = cone2.transform.translation
-        print("Updating V\n")
-        print("x={} y={}".format(cone1_pose.x, cone1_pose.y))
-        print("x={} y={}".format(cone2_pose.x, cone2_pose.y))
+        #print(threading.current_thread())
+        #print("Updating V\n")
+        #print("x={} y={}".format(cone1_pose.x, cone1_pose.y))
+        #print("x={} y={}".format(cone2_pose.x, cone2_pose.y))
+    
         #print(np.sum(self.V < 0))
         coord_list = []
         radius_list = []
@@ -268,15 +279,24 @@ class Controller:
         #print(coord_list)
         self.coordinate_list = coord_list
         #self.coordinate_list = [[cone1_pose.x, cone1_pose.y], [cone2_pose.x, cone2_pose.y]]
-        
+    
+        #if self.isSame(coord_list, self.prev_list):
+        #    self.compute_new = False
+        #else: 
+        #    self.compute_new = True
+        #     self.prev_list = coord_list
         start = time.time()
         #radius_list = [RADIUS, RADIUS]
+        #if self.compute_new == True:
+            #print("what\n")
+        print("x={} y={}".format(cone1_pose.x, cone1_pose.y))
+        print("x={} y={}".format(cone2_pose.x, cone2_pose.y))
         tmp = newexample.hjsolver_test(self.coordinate_list, radius_list)
         self.V_mutex.acquire()
         self.V = np.reshape(tmp, (60,60,20,36))
         self.V_mutex.release()
         end = time.time()
-        print(end - start)
+        #print(end - start)
         #np.save('tmp_result.npy', self.V)
         
 def main():

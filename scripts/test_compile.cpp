@@ -257,7 +257,7 @@ py::array_t<float> hjsolver_test(vector<vector<float>> obstacle_positions, vecto
     rc_memory = fpga_dma_burst_write(write_fd, (uint8_t *) read_buffer, buffer_size * sizeof(int), 0x10000000);
     //fail_on(rc_memory, out, "DMA write failed");
     
-    log_info("Starting AXI Master to DDR test");
+    //log_info("Starting AXI Master to DDR test");
     //cout << "Starting AXI Master to DDR test\n";
     /* Initializing control registers
      * Register File.
@@ -343,7 +343,7 @@ py::array_t<float> hjsolver_test(vector<vector<float>> obstacle_positions, vecto
     // Read from dram
     rc_memory = fpga_dma_burst_read(read_fd, (uint8_t *) read_buffer, buffer_size * sizeof(int), 0x10000000);
     //fail_on(rc_memory, out, "DMA read failed on reading form out buffer.");
-  
+    //cout << "I'm done\n";
     bool flag;
     flag = false;
     int count_nz;
