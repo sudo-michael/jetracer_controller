@@ -38,8 +38,8 @@ class Car_controller:
             rospy.spin()
 
     def keyboard_callback(self, in_msg):
+        # rospy.loginfo("recieved keyboard callback")
         self.manual_control_mutex.acquire()
-        rospy.logdebug("received new message")
         self.manual_control.throttle = in_msg.throttle
         self.manual_control.steerAngle = in_msg.steerAngle
         self.manual_control_mutex.release()
@@ -50,15 +50,17 @@ class Car_controller:
             jetracer_msg.throttle = opt_msg.throttle
             jetracer_msg.steerAngle = opt_msg.steerAngle
             if self.play_sound:
-                jetracer_msg.throttle = 0.0
-                subprocess.Popen(["ffplay", "-nodisp", "-autoexit", "-loglevel", "quiet",  "/home/michael/catkin_ws/src/jetracer_controller/scripts/safe.wav"])
+                # jetracer_msg.throttle = 0.0
+                subprocess.Popen(["ffplay", "-nodisp", "-autoexit", "-loglevel", "quiet",  "/home/mike/rosstuff/src/jetracer_controller/scripts/safe.wav"])
                 self.play_sound = False
 
                 rospy.logwarn("optimal control taking over!")
-                if jetracer_msg.steerAngle < 0:
-                    rospy.loginfo("throttle: {} steerAngle: {} {}".format(jetracer_msg.throttle, jetracer_msg.steerAngle, "left"))
-                else:
-                    rospy.loginfo("throttle: {} steerAngle: {} {}".format(jetracer_msg.throttle, jetracer_msg.steerAngle, "right"))
+            if jetracer_msg.steerAngle < 0:
+                # rospy.loginfo("throttle: {} steerAngle: {} {}".format(jetracer_msg.throttle, jetracer_msg.steerAngle, "left"))
+                rospy.loginfo("left")
+            else:
+                # rospy.loginfo("throttle: {} steerAngle: {} {}".format(jetracer_msg.throttle, jetracer_msg.steerAngle, "right"))
+                rospy.loginfo("right")
             self.publisher.publish(jetracer_msg)
         else: # Not in danger
             if self.play_sound == False:
